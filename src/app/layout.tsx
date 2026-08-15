@@ -14,10 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AutoTrade Pro - تداول آلي ذكي",
-  description: "منصة تداول آلي متقدمة لأزواج العملات مع روبوت تداول ذكي واستراتيجيات متعددة",
-  keywords: ["تداول", "فوركس", "تداول آلي", "روبوت تداول", "أزواج عملات", "AutoTrade"],
-  authors: [{ name: "AutoTrade Pro" }],
+  title: "Alfa Expert - تداول آلي ذكي",
+  description: "منصة Alfa Expert للتداول الآلي المتقدم لأزواج العملات مع روبوت تداول ذكي واستراتيجيات متعددة",
+  keywords: ["تداول", "فوركس", "تداول آلي", "روبوت تداول", "أزواج عملات", "Alfa Expert"],
+  authors: [{ name: "Alfa Expert" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },

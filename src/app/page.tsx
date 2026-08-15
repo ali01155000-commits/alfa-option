@@ -47,8 +47,8 @@ export default function TradingPlatform() {
               <TrendingUp className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-sm font-bold leading-tight text-[#F5F5F5]">ExpertTrade</h1>
-              <p className="text-[9px] text-[#A9B5CB]">تداول آلي ذكي</p>
+              <h1 className="text-sm font-bold leading-tight text-[#F5F5F5]">Alfa Expert</h1>
+              <p className="text-[9px] text-[#A9B5CB]">Alfa Expert Trading</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -216,7 +216,7 @@ export default function TradingPlatform() {
       {/* Bottom Footer - Expert Option style */}
       <footer className="border-t border-[#3A4568] bg-[#222940] px-3 py-1">
         <div className="flex items-center justify-between text-[9px] text-[#A9B5CB]">
-          <span>ExpertTrade v2.0 • تداول آلي ذكي</span>
+          <span>Alfa Expert v2.0 • تداول آلي ذكي</span>
           <div className="flex items-center gap-1.5">
             <span className={`flex items-center gap-0.5 ${isConnected ? 'text-[#57BC9A]' : 'text-[#D0011B]'}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-[#57BC9A]' : 'bg-[#D0011B]'}`}></span>
