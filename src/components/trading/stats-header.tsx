@@ -7,18 +7,24 @@ import { TrendingUp, TrendingDown, Wallet, BarChart3, Bot } from 'lucide-react'
 export function StatsHeader() {
   const { balance, totalPnL, openTrades, botConfig, tradeHistory, prices } = useTradingStore()
 
+  // Options-style unrealized PnL: based on trade direction vs price movement
   const unrealizedPnL = openTrades.reduce((sum, trade) => {
     const currentPrice = prices[trade.pair]?.price
     if (!currentPrice) return sum
-    const pipSize = prices[trade.pair]?.pipSize || 0.0001
-    const pnl = trade.direction === 'buy'
-      ? ((currentPrice - trade.entryPrice) / pipSize) * trade.amount * 0.01
-      : ((trade.entryPrice - currentPrice) / pipSize) * trade.amount * 0.01
-    return sum + pnl
+
+    if (trade.direction === 'buy') {
+      const won = currentPrice > trade.entryPrice
+      const pnl = won ? trade.amount * (trade.payoutPercent / 100) : -trade.amount
+      return sum + (currentPrice === trade.entryPrice ? 0 : pnl)
+    } else {
+      const won = currentPrice < trade.entryPrice
+      const pnl = won ? trade.amount * (trade.payoutPercent / 100) : -trade.amount
+      return sum + (currentPrice === trade.entryPrice ? 0 : pnl)
+    }
   }, 0)
 
   const realizedPnL = tradeHistory.reduce((sum, t) => sum + t.pnl, 0)
-  const winningTrades = tradeHistory.filter(t => t.pnl > 0).length
+  const winningTrades = tradeHistory.filter(t => t.won).length
   const winRate = tradeHistory.length > 0 ? (winningTrades / tradeHistory.length) * 100 : 0
 
   const stats = [
@@ -31,14 +37,14 @@ export function StatsHeader() {
     },
     {
       icon: unrealizedPnL >= 0 ? TrendingUp : TrendingDown,
-      label: 'P&L',
+      label: 'الربح',
       value: `${unrealizedPnL >= 0 ? '+' : ''}$${unrealizedPnL.toFixed(2)}`,
       color: unrealizedPnL >= 0 ? 'text-[#57BC9A]' : 'text-[#D0011B]',
       bgColor: unrealizedPnL >= 0 ? 'bg-[#57BC9A]/15' : 'bg-[#D0011B]/15'
     },
     {
       icon: BarChart3,
-      label: 'الفوز',
+      label: 'نسبة الفوز',
       value: `${winRate.toFixed(1)}%`,
       color: winRate >= 50 ? 'text-[#57BC9A]' : 'text-[#D0011B]',
       bgColor: 'bg-[#2D3651]'
@@ -46,7 +52,7 @@ export function StatsHeader() {
     {
       icon: Bot,
       label: 'البوت',
-      value: botConfig.enabled ? 'ON' : 'OFF',
+      value: botConfig.enabled ? 'نشط' : 'متوقف',
       color: botConfig.enabled ? 'text-[#57BC9A]' : 'text-[#A9B5CB]',
       bgColor: botConfig.enabled ? 'bg-[#57BC9A]/15' : 'bg-[#2D3651]'
     },

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-// ============ TYPES ============
+// ============ TYPES (Options Trading Model) ============
 export interface PriceData {
   symbol: string
   name?: string
@@ -13,6 +13,7 @@ export interface PriceData {
   digits: number
   pipSize?: number
   category?: string
+  payoutPercent?: number  // Options payout % (e.g. 82 means 82% profit on win)
 }
 
 export interface Candle {
@@ -27,18 +28,20 @@ export interface Candle {
 export interface TradeData {
   id: string
   pair: string
-  direction: 'buy' | 'sell'
+  direction: 'buy' | 'sell'   // buy = CALL (price goes up), sell = PUT (price goes down)
   entryPrice: number
-  amount: number
-  takeProfit: number
-  stopLoss: number
+  amount: number              // Trade amount in USD ($1-$100)
+  payoutPercent: number       // Payout percentage (e.g. 82%)
+  expiryTime: number          // Expiry timestamp (ms)
+  expiryMinutes: number       // Expiry duration in minutes
   strategy: string
   timestamp: number
 }
 
 export interface ClosedTrade extends TradeData {
   exitPrice: number
-  pnl: number
+  pnl: number                 // +amount×payout% on win, -amount on loss
+  won: boolean
 }
 
 export interface StrategyConfig {
@@ -46,10 +49,9 @@ export interface StrategyConfig {
   type: string
   active: boolean
   pair: string
-  takeProfit: number
-  stopLoss: number
+  expiryMinutes: number       // Expiry time for auto trades
   maxTrades: number
-  amountPerTrade: number
+  amountPerTrade: number      // $1-$100
   params: Record<string, any>
 }
 
@@ -161,8 +163,8 @@ export const useTradingStore = create<TradingStore>((set) => ({
   botConfig: {
     enabled: false,
     maxConcurrentTrades: 3,
-    maxDailyLoss: 500,
-    maxDailyProfit: 1000,
+    maxDailyLoss: 50,
+    maxDailyProfit: 100,
     riskPerTrade: 2,
     trailingStop: false,
     trailingStopPct: 1.5
@@ -170,7 +172,7 @@ export const useTradingStore = create<TradingStore>((set) => ({
   setBotConfig: (config) => set({ botConfig: config }),
 
   // Account
-  balance: 10000,
+  balance: 1000,
   setBalance: (val) => set({ balance: val }),
   totalPnL: 0,
   setTotalPnL: (val) => set({ totalPnL: val }),

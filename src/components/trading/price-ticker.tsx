@@ -85,8 +85,13 @@ export function PriceTicker() {
               <div className={`text-xs font-mono font-bold mt-0.5 ${isSelected ? 'text-white' : isUp ? 'text-[#57BC9A]' : 'text-[#D0011B]'}`}>
                 {p.price.toFixed(p.digits)}
               </div>
-              <div className={`text-[9px] font-medium ${isSelected ? 'text-white/80' : p.change24h >= 0 ? 'text-[#57BC9A]' : 'text-[#D0011B]'}`}>
-                {p.change24h >= 0 ? '▲' : '▼'} {Math.abs(p.change24h).toFixed(2)}%
+              <div className="flex items-center justify-between gap-1">
+                <div className={`text-[9px] font-medium ${isSelected ? 'text-white/80' : p.change24h >= 0 ? 'text-[#57BC9A]' : 'text-[#D0011B]'}`}>
+                  {p.change24h >= 0 ? '▲' : '▼'} {Math.abs(p.change24h).toFixed(2)}%
+                </div>
+                <div className="text-[8px] font-mono font-bold text-[#57BC9A]">
+                  {p.payoutPercent || 82}%
+                </div>
               </div>
             </button>
           )

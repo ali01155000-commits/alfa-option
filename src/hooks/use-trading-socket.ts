@@ -44,6 +44,12 @@ export function useTradingSocket() {
       if (data.candles) setCandles(data.candles)
       if (data.strategies) setStrategies(data.strategies)
       if (data.botConfig) setBotConfig(data.botConfig)
+      // Add any open trades from server state
+      if (data.openTrades) {
+        Object.values(data.openTrades).forEach((trade: any) => {
+          addOpenTrade(trade)
+        })
+      }
     })
 
     socketInstance.on('price-update', (prices: any) => {
@@ -66,6 +72,13 @@ export function useTradingSocket() {
     socketInstance.on('auto-trade-closed', (trade: any) => {
       removeOpenTrade(trade.id)
       addClosedTrade(trade)
+    })
+
+    socketInstance.on('candle-history', (data: any) => {
+      if (data.pair && data.candles) {
+        const { updateCandles } = useTradingStore.getState()
+        updateCandles(data.pair, data.candles)
+      }
     })
 
     socketInstance.on('strategies-list', (strategies: any) => {

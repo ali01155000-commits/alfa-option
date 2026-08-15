@@ -179,7 +179,9 @@ export default function TradingPlatform() {
                     ['الرصيد', '$10,000.00'],
                     ['العملة', 'USD'],
                     ['النوع', 'تجريبي (Demo)'],
-                    ['الرافعة', '1:100'],
+                    ['نوع التداول', 'أوبشن (خيارات)'],
+                    ['الحد الأدنى', '$1'],
+                    ['الحد الأقصى', '$100'],
                   ].map(([k, v]) => (
                     <div key={k} className="flex justify-between text-[11px]">
                       <span className="text-[#A9B5CB]">{k}</span>
@@ -193,8 +195,10 @@ export default function TradingPlatform() {
               <div className="bg-[#2D3651] border border-[#3A4568] rounded-lg p-3">
                 <h3 className="text-xs font-bold mb-2 text-[#F5F5F5]">إعدادات التداول</h3>
                 <div className="space-y-1.5 text-[11px] text-[#A9B5CB]">
-                  <p>• جميع الصفقات في وضع تجريبي (Demo)</p>
-                  <p>• البيانات محاكاة للأسعار الحقيقية</p>
+                  <p>• تداول أوبشن (خيارات) - صفقات ثابتة</p>
+                  <p>• مبلغ الصفقة: $1 إلى $100</p>
+                  <p>• الربح = مبلغ الصفقة × نسبة العائد</p>
+                  <p>• الخسارة = مبلغ الصفقة كاملاً</p>
                   <p>• استخدم البوت الآلي لاختبار الاستراتيجيات</p>
                   <p>• يمكنك إضافة عدة استراتيجيات معاً</p>
                   <p>• تأكد من ضبط إدارة المخاطر أولاً</p>
