@@ -12,7 +12,7 @@ const io = new Server(httpServer, {
   pingInterval: 25000,
 })
 
-// ============ CURRENCY PAIRS CONFIG ============
+// ============ CURRENCY PAIRS (Real Market Prices) ============
 interface CurrencyPair {
   symbol: string
   name: string
@@ -24,17 +24,39 @@ interface CurrencyPair {
   spread: number
   pipSize: number
   digits: number
+  category: string // 'major', 'minor', 'exotic', 'crypto'
 }
 
 const initialPairs: CurrencyPair[] = [
-  { symbol: 'EUR/USD', name: 'Euro / US Dollar', price: 1.0856, prevPrice: 1.0856, high24h: 1.0892, low24h: 1.0821, change24h: 0.12, spread: 0.00012, pipSize: 0.0001, digits: 5 },
-  { symbol: 'GBP/USD', name: 'British Pound / US Dollar', price: 1.2734, prevPrice: 1.2734, high24h: 1.2781, low24h: 1.2695, change24h: -0.08, spread: 0.00015, pipSize: 0.0001, digits: 5 },
-  { symbol: 'USD/JPY', name: 'US Dollar / Japanese Yen', price: 149.82, prevPrice: 149.82, high24h: 150.15, low24h: 149.20, change24h: 0.25, spread: 0.015, pipSize: 0.01, digits: 3 },
-  { symbol: 'AUD/USD', name: 'Australian Dollar / US Dollar', price: 0.6542, prevPrice: 0.6542, high24h: 0.6578, low24h: 0.6515, change24h: -0.15, spread: 0.00014, pipSize: 0.0001, digits: 5 },
-  { symbol: 'USD/CAD', name: 'US Dollar / Canadian Dollar', price: 1.3645, prevPrice: 1.3645, high24h: 1.3682, low24h: 1.3608, change24h: 0.09, spread: 0.00016, pipSize: 0.0001, digits: 5 },
-  { symbol: 'EUR/GBP', name: 'Euro / British Pound', price: 0.8525, prevPrice: 0.8525, high24h: 0.8558, low24h: 0.8492, change24h: 0.05, spread: 0.00013, pipSize: 0.0001, digits: 5 },
-  { symbol: 'USD/CHF', name: 'US Dollar / Swiss Franc', price: 0.8823, prevPrice: 0.8823, high24h: 0.8856, low24h: 0.8789, change24h: -0.03, spread: 0.00015, pipSize: 0.0001, digits: 5 },
-  { symbol: 'NZD/USD', name: 'New Zealand Dollar / US Dollar', price: 0.5987, prevPrice: 0.5987, high24h: 0.6025, low24h: 0.5958, change24h: 0.18, spread: 0.00018, pipSize: 0.0001, digits: 5 },
+  // Major Pairs
+  { symbol: 'EUR/USD', name: 'Euro / US Dollar', price: 1.0915, prevPrice: 1.0915, high24h: 1.0938, low24h: 1.0892, change24h: 0.12, spread: 0.00012, pipSize: 0.0001, digits: 5, category: 'major' },
+  { symbol: 'GBP/USD', name: 'British Pound / US Dollar', price: 1.2687, prevPrice: 1.2687, high24h: 1.2725, low24h: 1.2658, change24h: -0.08, spread: 0.00014, pipSize: 0.0001, digits: 5, category: 'major' },
+  { symbol: 'USD/JPY', name: 'US Dollar / Japanese Yen', price: 147.52, prevPrice: 147.52, high24h: 148.05, low24h: 147.10, change24h: 0.21, spread: 0.008, pipSize: 0.01, digits: 3, category: 'major' },
+  { symbol: 'USD/CHF', name: 'US Dollar / Swiss Franc', price: 0.8823, prevPrice: 0.8823, high24h: 0.8856, low24h: 0.8789, change24h: -0.03, spread: 0.00015, pipSize: 0.0001, digits: 5, category: 'major' },
+  { symbol: 'AUD/USD', name: 'Australian Dollar / US Dollar', price: 0.6534, prevPrice: 0.6534, high24h: 0.6562, low24h: 0.6515, change24h: 0.15, spread: 0.00014, pipSize: 0.0001, digits: 5, category: 'major' },
+  { symbol: 'USD/CAD', name: 'US Dollar / Canadian Dollar', price: 1.3645, prevPrice: 1.3645, high24h: 1.3682, low24h: 1.3608, change24h: 0.09, spread: 0.00016, pipSize: 0.0001, digits: 5, category: 'major' },
+  { symbol: 'NZD/USD', name: 'New Zealand Dollar / US Dollar', price: 0.5987, prevPrice: 0.5987, high24h: 0.6025, low24h: 0.5958, change24h: 0.18, spread: 0.00018, pipSize: 0.0001, digits: 5, category: 'major' },
+
+  // Minor/Cross Pairs
+  { symbol: 'EUR/GBP', name: 'Euro / British Pound', price: 0.8525, prevPrice: 0.8525, high24h: 0.8558, low24h: 0.8492, change24h: 0.05, spread: 0.00013, pipSize: 0.0001, digits: 5, category: 'minor' },
+  { symbol: 'EUR/JPY', name: 'Euro / Japanese Yen', price: 161.15, prevPrice: 161.15, high24h: 161.82, low24h: 160.78, change24h: 0.14, spread: 0.012, pipSize: 0.01, digits: 3, category: 'minor' },
+  { symbol: 'GBP/JPY', name: 'British Pound / Japanese Yen', price: 187.12, prevPrice: 187.12, high24h: 187.85, low24h: 186.55, change24h: 0.22, spread: 0.015, pipSize: 0.01, digits: 3, category: 'minor' },
+  { symbol: 'EUR/AUD', name: 'Euro / Australian Dollar', price: 1.6708, prevPrice: 1.6708, high24h: 1.6745, low24h: 1.6678, change24h: -0.06, spread: 0.00022, pipSize: 0.0001, digits: 5, category: 'minor' },
+  { symbol: 'EUR/CHF', name: 'Euro / Swiss Franc', price: 0.9632, prevPrice: 0.9632, high24h: 0.9658, low24h: 0.9608, change24h: 0.02, spread: 0.00018, pipSize: 0.0001, digits: 5, category: 'minor' },
+  { symbol: 'GBP/AUD', name: 'British Pound / Australian Dollar', price: 1.9412, prevPrice: 1.9412, high24h: 1.9458, low24h: 1.9368, change24h: -0.11, spread: 0.00025, pipSize: 0.0001, digits: 5, category: 'minor' },
+  { symbol: 'AUD/JPY', name: 'Australian Dollar / Japanese Yen', price: 96.42, prevPrice: 96.42, high24h: 96.85, low24h: 95.98, change24h: 0.09, spread: 0.012, pipSize: 0.01, digits: 3, category: 'minor' },
+  { symbol: 'CHF/JPY', name: 'Swiss Franc / Japanese Yen', price: 167.21, prevPrice: 167.21, high24h: 167.65, low24h: 166.82, change24h: 0.15, spread: 0.012, pipSize: 0.01, digits: 3, category: 'minor' },
+
+  // Exotic Pairs
+  { symbol: 'USD/TRY', name: 'US Dollar / Turkish Lira', price: 32.85, prevPrice: 32.85, high24h: 33.12, low24h: 32.55, change24h: 0.35, spread: 0.035, pipSize: 0.01, digits: 3, category: 'exotic' },
+  { symbol: 'USD/ZAR', name: 'US Dollar / South African Rand', price: 18.15, prevPrice: 18.15, high24h: 18.28, low24h: 17.98, change24h: 0.22, spread: 0.025, pipSize: 0.01, digits: 3, category: 'exotic' },
+  { symbol: 'USD/SGD', name: 'US Dollar / Singapore Dollar', price: 1.3145, prevPrice: 1.3145, high24h: 1.3168, low24h: 1.3122, change24h: -0.04, spread: 0.00018, pipSize: 0.0001, digits: 5, category: 'exotic' },
+  { symbol: 'USD/HKD', name: 'US Dollar / Hong Kong Dollar', price: 7.8125, prevPrice: 7.8125, high24h: 7.8148, low24h: 7.8102, change24h: 0.01, spread: 0.00015, pipSize: 0.0001, digits: 5, category: 'exotic' },
+  { symbol: 'EUR/TRY', name: 'Euro / Turkish Lira', price: 35.87, prevPrice: 35.87, high24h: 36.15, low24h: 35.52, change24h: 0.42, spread: 0.045, pipSize: 0.01, digits: 3, category: 'exotic' },
+
+  // Crypto Pairs
+  { symbol: 'BTC/USD', name: 'Bitcoin / US Dollar', price: 59250.00, prevPrice: 59250.00, high24h: 59850.00, low24h: 58500.00, change24h: 1.25, spread: 15.0, pipSize: 1, digits: 2, category: 'crypto' },
+  { symbol: 'ETH/USD', name: 'Ethereum / US Dollar', price: 2635.50, prevPrice: 2635.50, high24h: 2685.00, low24h: 2595.00, change24h: 0.85, spread: 1.5, pipSize: 0.01, digits: 2, category: 'crypto' },
 ]
 
 const pairs = new Map<string, CurrencyPair>()
@@ -52,14 +74,13 @@ interface Candle {
 
 const candleHistory = new Map<string, Candle[]>()
 
-// Initialize candle history for each pair
 for (const [symbol, pair] of pairs) {
   const history: Candle[] = []
   const now = Date.now()
   let price = pair.price
-  
+
   for (let i = 100; i >= 0; i--) {
-    const time = now - i * 60000 // 1-minute candles
+    const time = now - i * 60000
     const volatility = pair.pipSize * (3 + Math.random() * 8)
     const open = price
     const change1 = (Math.random() - 0.5) * volatility * 2
@@ -68,11 +89,11 @@ for (const [symbol, pair] of pairs) {
     const high = Math.max(open, close) + Math.abs(change2)
     const low = Math.min(open, close) - Math.abs(change2)
     const volume = Math.floor(100 + Math.random() * 900)
-    
+
     history.push({ time, open, high, low, close, volume })
     price = close
   }
-  
+
   candleHistory.set(symbol, history)
 }
 
@@ -80,12 +101,11 @@ for (const [symbol, pair] of pairs) {
 function updatePrices() {
   for (const [symbol, pair] of pairs) {
     pair.prevPrice = pair.price
-    
-    // Random walk with mean reversion
+
     const volatility = pair.pipSize * (0.5 + Math.random() * 2)
     const meanReversion = (initialPairs.find(p => p.symbol === symbol)!.price - pair.price) * 0.001
     const change = (Math.random() - 0.5) * volatility + meanReversion
-    
+
     pair.price += change
     pair.high24h = Math.max(pair.high24h, pair.price)
     pair.low24h = Math.min(pair.low24h, pair.price)
@@ -95,13 +115,12 @@ function updatePrices() {
 
 function updateCandles() {
   const now = Date.now()
-  
+
   for (const [symbol, pair] of pairs) {
     const history = candleHistory.get(symbol)!
     const lastCandle = history[history.length - 1]
-    
+
     if (now - lastCandle.time >= 60000) {
-      // Create new candle
       history.push({
         time: now,
         open: pair.price,
@@ -112,7 +131,6 @@ function updateCandles() {
       })
       if (history.length > 200) history.shift()
     } else {
-      // Update current candle
       const current = history[history.length - 1]
       current.close = pair.price
       current.high = Math.max(current.high, pair.price)
@@ -170,7 +188,6 @@ let botConfig: BotConfig = {
 }
 let dailyPnL = 0
 
-// Strategy execution
 function executeStrategies() {
   if (!botConfig.enabled) return
   if (autoTrades.size >= botConfig.maxConcurrentTrades) return
@@ -180,7 +197,7 @@ function executeStrategies() {
   for (const [id, strategy] of activeStrategies) {
     if (!strategy.active) continue
     if (autoTrades.size >= botConfig.maxConcurrentTrades) break
-    
+
     const pair = pairs.get(strategy.pair)
     if (!pair) continue
 
@@ -194,7 +211,7 @@ function executeStrategies() {
       case 'ma_cross': {
         const shortMA = recentCandles.slice(-5).reduce((s, c) => s + c.close, 0) / 5
         const longMA = recentCandles.reduce((s, c) => s + c.close, 0) / 20
-        if (shortMA > longMA && recentCandles[recentCandles.length - 2]) {
+        if (shortMA > longMA) {
           const prevShortMA = recentCandles.slice(-6, -1).reduce((s, c) => s + c.close, 0) / 5
           const prevLongMA = recentCandles.slice(0, -1).reduce((s, c) => s + c.close, 0) / 19
           if (prevShortMA <= prevLongMA) signal = 'buy'
@@ -217,7 +234,7 @@ function executeStrategies() {
         const avgLoss = losses.reduce((s, l) => s + l, 0) / losses.length
         const rs = avgLoss === 0 ? 100 : avgGain / avgLoss
         const rsi = 100 - (100 / (1 + rs))
-        
+
         if (rsi < 30) signal = 'buy'
         else if (rsi > 70) signal = 'sell'
         break
@@ -249,7 +266,7 @@ function executeStrategies() {
     if (signal) {
       const tradeId = `auto_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
       const pipValue = pair.pipSize
-      
+
       autoTrades.set(tradeId, {
         id: tradeId,
         pair: strategy.pair,
@@ -261,7 +278,7 @@ function executeStrategies() {
         strategy: strategy.type,
         timestamp: Date.now()
       })
-      
+
       io.emit('auto-trade-opened', autoTrades.get(tradeId))
     }
   }
@@ -277,7 +294,6 @@ function calcEMA(data: number[], period: number): number {
   return ema
 }
 
-// Check auto trades for TP/SL hits
 function checkAutoTrades() {
   for (const [id, trade] of autoTrades) {
     const pair = pairs.get(trade.pair)
@@ -316,18 +332,21 @@ function checkAutoTrades() {
 setInterval(() => {
   updatePrices()
   updateCandles()
-  
+
   const pricesData: Record<string, any> = {}
   for (const [symbol, pair] of pairs) {
     pricesData[symbol] = {
       symbol: pair.symbol,
+      name: pair.name,
       price: pair.price,
       prevPrice: pair.prevPrice,
       high24h: pair.high24h,
       low24h: pair.low24h,
       change24h: pair.change24h,
       spread: pair.spread,
-      digits: pair.digits
+      digits: pair.digits,
+      pipSize: pair.pipSize,
+      category: pair.category,
     }
   }
   io.emit('price-update', pricesData)
@@ -342,18 +361,20 @@ setInterval(() => {
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`)
 
-  // Send initial data
   const pricesData: Record<string, any> = {}
   for (const [symbol, pair] of pairs) {
     pricesData[symbol] = {
       symbol: pair.symbol,
+      name: pair.name,
       price: pair.price,
       prevPrice: pair.prevPrice,
       high24h: pair.high24h,
       low24h: pair.low24h,
       change24h: pair.change24h,
       spread: pair.spread,
-      digits: pair.digits
+      digits: pair.digits,
+      pipSize: pair.pipSize,
+      category: pair.category,
     }
   }
   socket.emit('initial-data', {
@@ -364,7 +385,6 @@ io.on('connection', (socket) => {
     botConfig
   })
 
-  // Get candle history for a specific pair
   socket.on('get-candles', (data: { pair: string }) => {
     const history = candleHistory.get(data.pair)
     if (history) {
@@ -372,7 +392,6 @@ io.on('connection', (socket) => {
     }
   })
 
-  // Strategy management
   socket.on('add-strategy', (strategy: StrategyConfig) => {
     const id = `strat_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
     activeStrategies.set(id, strategy)
@@ -393,7 +412,6 @@ io.on('connection', (socket) => {
     }
   })
 
-  // Bot config
   socket.on('update-bot-config', (config: Partial<BotConfig>) => {
     botConfig = { ...botConfig, ...config }
     io.emit('bot-config-update', botConfig)
@@ -402,13 +420,13 @@ io.on('connection', (socket) => {
   socket.on('toggle-bot', (data: { enabled: boolean }) => {
     botConfig.enabled = data.enabled
     if (!data.enabled) {
-      // Close all auto trades when bot is disabled
       for (const [id, trade] of autoTrades) {
         const pair = pairs.get(trade.pair)
         const exitPrice = pair ? pair.price : trade.entryPrice
+        const pipSize = pair ? pair.pipSize : 0.0001
         const pnl = trade.direction === 'buy'
-          ? (exitPrice - trade.entryPrice) / pairs.get(trade.pair)!.pipSize * trade.amount * 0.01
-          : (trade.entryPrice - exitPrice) / pairs.get(trade.pair)!.pipSize * trade.amount * 0.01
+          ? (exitPrice - trade.entryPrice) / pipSize * trade.amount * 0.01
+          : (trade.entryPrice - exitPrice) / pipSize * trade.amount * 0.01
         dailyPnL += pnl
         io.emit('auto-trade-closed', { ...trade, exitPrice, pnl })
       }
@@ -417,7 +435,6 @@ io.on('connection', (socket) => {
     io.emit('bot-config-update', botConfig)
   })
 
-  // Manual trade execution
   socket.on('manual-trade', (data: { pair: string, direction: 'buy' | 'sell', amount: number, takeProfit: number, stopLoss: number }) => {
     const pair = pairs.get(data.pair)
     if (!pair) return
@@ -438,16 +455,16 @@ io.on('connection', (socket) => {
     io.emit('trade-opened', trade)
   })
 
-  // Close trade manually
   socket.on('close-trade', (data: { id: string }) => {
     const trade = autoTrades.get(data.id)
     if (!trade) return
 
     const pair = pairs.get(trade.pair)
     const exitPrice = pair ? pair.price : trade.entryPrice
+    const pipSize = pair ? pair.pipSize : 0.0001
     const pnl = trade.direction === 'buy'
-      ? (exitPrice - trade.entryPrice) / (pairs.get(trade.pair)?.pipSize || 0.0001) * trade.amount * 0.01
-      : (trade.entryPrice - exitPrice) / (pairs.get(trade.pair)?.pipSize || 0.0001) * trade.amount * 0.01
+      ? (exitPrice - trade.entryPrice) / pipSize * trade.amount * 0.01
+      : (trade.entryPrice - exitPrice) / pipSize * trade.amount * 0.01
 
     dailyPnL += pnl
     autoTrades.delete(data.id)

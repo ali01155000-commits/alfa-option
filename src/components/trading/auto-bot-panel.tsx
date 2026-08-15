@@ -23,7 +23,7 @@ const strategyTypes = [
   { value: 'trend_follow', label: 'متابعة الاتجاه', desc: 'Trend Following' },
 ]
 
-const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'EUR/GBP', 'USD/CHF', 'NZD/USD']
+const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'USD/CHF', 'NZD/USD', 'BTC/USD', 'ETH/USD']
 
 export function AutoBotPanel({ emit }: AutoBotPanelProps) {
   const { botConfig, strategies } = useTradingStore()
@@ -78,21 +78,21 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
   return (
     <div className="space-y-4">
       {/* Bot Status */}
-      <Card className="border-border">
+      <Card className="border-[#3A4568] bg-[#2D3651]">
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4" />
+          <CardTitle className="flex items-center justify-between text-xs text-[#F5F5F5]">
+            <div className="flex items-center gap-1.5">
+              <Bot className="w-4 h-4 text-[#2F96F0]" />
               <span>روبوت التداول الآلي</span>
             </div>
-            <Badge variant={botConfig.enabled ? 'default' : 'secondary'} className={botConfig.enabled ? 'bg-emerald-500' : ''}>
+            <Badge className={`text-[9px] ${botConfig.enabled ? 'bg-[#57BC9A]/20 text-[#57BC9A] border-[#57BC9A]/30' : 'bg-[#20283D] text-[#A9B5CB] border-[#3A4568]'}`} variant="outline">
               {botConfig.enabled ? '🟢 نشط' : '⏸ متوقف'}
             </Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm">تفعيل الروبوت</span>
+            <span className="text-[11px] text-[#A9B5CB]">تفعيل الروبوت</span>
             <Switch
               checked={botConfig.enabled}
               onCheckedChange={handleToggleBot}
@@ -100,9 +100,9 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
           </div>
 
           {/* Risk Management */}
-          <div className="space-y-3 pt-2 border-t">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Settings className="w-3.5 h-3.5" />
+          <div className="space-y-2.5 pt-2 border-t border-[#3A4568]">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#F5F5F5]">
+              <Settings className="w-3 h-3 text-[#2F96F0]" />
               <span>إدارة المخاطر</span>
             </div>
 

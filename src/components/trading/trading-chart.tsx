@@ -19,14 +19,11 @@ export function TradingChart() {
       }))
     }
 
-    // Candlestick: we show OHLC as bars (body) and wicks as lines
     return pairCandles.map((c: Candle) => {
       const isUp = c.close >= c.open
       return {
         time: new Date(c.time).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' }),
-        // Body (open-close range as a bar)
         body: isUp ? [c.open, c.close] : [c.close, c.open],
-        // Wick
         wick: [c.low, c.high],
         isUp,
         volume: c.volume,
@@ -49,7 +46,7 @@ export function TradingChart() {
 
   if (pairCandles.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground">
+      <div className="flex items-center justify-center h-full text-[#A9B5CB]">
         <div className="text-center">
           <div className="text-4xl mb-2">📊</div>
           <p>Loading chart data...</p>
@@ -58,27 +55,34 @@ export function TradingChart() {
     )
   }
 
+  // Expert Option colors
+  const EO_GREEN = '#57BC9A'
+  const EO_RED = '#D0011B'
+  const EO_BLUE = '#2F96F0'
+  const EO_GRID = '#3A4568'
+  const EO_TEXT = '#A9B5CB'
+
   if (chartType === 'line') {
     return (
       <div className="w-full h-full">
         <ResponsiveContainer width="100%" height="80%">
           <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-            <XAxis dataKey="time" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-            <YAxis domain={priceDomain} tick={{ fontSize: 10 }} tickFormatter={(v: number) => v.toFixed(digits)} />
+            <XAxis dataKey="time" tick={{ fontSize: 9, fill: EO_TEXT }} tickLine={{ stroke: EO_GRID }} axisLine={{ stroke: EO_GRID }} interval="preserveStartEnd" />
+            <YAxis domain={priceDomain} tick={{ fontSize: 9, fill: EO_TEXT }} tickLine={{ stroke: EO_GRID }} axisLine={{ stroke: EO_GRID }} tickFormatter={(v: number) => v.toFixed(digits)} />
             <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 8 }}
+              contentStyle={{ fontSize: 11, borderRadius: 6, backgroundColor: '#2D3651', border: '1px solid #3A4568', color: '#F5F5F5' }}
               formatter={(value: number) => [value.toFixed(digits), 'Price']}
             />
-            <Line type="monotone" dataKey="price" stroke="#10b981" dot={false} strokeWidth={2} />
-            <ReferenceLine y={currentPrice} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth={1} />
+            <Line type="monotone" dataKey="price" stroke={EO_GREEN} dot={false} strokeWidth={2} />
+            <ReferenceLine y={currentPrice} stroke={EO_BLUE} strokeDasharray="3 3" strokeWidth={1} />
           </ComposedChart>
         </ResponsiveContainer>
         <div className="px-4">
           <ResponsiveContainer width="100%" height="18%">
             <ComposedChart data={chartData} margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
               <XAxis dataKey="time" tick={false} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 8 }} />
-              <Bar dataKey="volume" fill="#6366f1" opacity={0.5} />
+              <YAxis tick={{ fontSize: 7, fill: EO_TEXT }} />
+              <Bar dataKey="volume" fill={EO_BLUE} opacity={0.4} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -90,23 +94,23 @@ export function TradingChart() {
     <div className="w-full h-full">
       <ResponsiveContainer width="100%" height="80%">
         <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-          <XAxis dataKey="time" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-          <YAxis domain={priceDomain} tick={{ fontSize: 10 }} tickFormatter={(v: number) => v.toFixed(digits)} />
+          <XAxis dataKey="time" tick={{ fontSize: 9, fill: EO_TEXT }} tickLine={{ stroke: EO_GRID }} axisLine={{ stroke: EO_GRID }} interval="preserveStartEnd" />
+          <YAxis domain={priceDomain} tick={{ fontSize: 9, fill: EO_TEXT }} tickLine={{ stroke: EO_GRID }} axisLine={{ stroke: EO_GRID }} tickFormatter={(v: number) => v.toFixed(digits)} />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 8 }}
+            contentStyle={{ fontSize: 11, borderRadius: 6, backgroundColor: '#2D3651', border: '1px solid #3A4568', color: '#F5F5F5' }}
             content={({ payload }) => {
               if (!payload || payload.length === 0) return null
               const d = payload[0]?.payload
               if (!d) return null
               return (
-                <div className="bg-popover border border-border rounded-lg p-2 text-xs shadow-lg">
+                <div className="bg-[#2D3651] border border-[#3A4568] rounded-md p-2 text-[11px] shadow-lg text-[#F5F5F5]">
                   <div className="font-bold mb-1">{d.time}</div>
                   <div className="grid grid-cols-2 gap-x-3">
-                    <span className="text-muted-foreground">O:</span><span className="font-mono">{d.open?.toFixed(digits)}</span>
-                    <span className="text-muted-foreground">H:</span><span className="font-mono text-emerald-500">{d.high?.toFixed(digits)}</span>
-                    <span className="text-muted-foreground">L:</span><span className="font-mono text-red-500">{d.low?.toFixed(digits)}</span>
-                    <span className="text-muted-foreground">C:</span><span className="font-mono">{d.close?.toFixed(digits)}</span>
-                    <span className="text-muted-foreground">Vol:</span><span className="font-mono">{d.volume}</span>
+                    <span className="text-[#A9B5CB]">O:</span><span className="font-mono">{d.open?.toFixed(digits)}</span>
+                    <span className="text-[#A9B5CB]">H:</span><span className="font-mono text-[#57BC9A]">{d.high?.toFixed(digits)}</span>
+                    <span className="text-[#A9B5CB]">L:</span><span className="font-mono text-[#D0011B]">{d.low?.toFixed(digits)}</span>
+                    <span className="text-[#A9B5CB]">C:</span><span className="font-mono">{d.close?.toFixed(digits)}</span>
+                    <span className="text-[#A9B5CB]">Vol:</span><span className="font-mono">{d.volume}</span>
                   </div>
                 </div>
               )
@@ -115,10 +119,9 @@ export function TradingChart() {
           <Bar dataKey="body" shape={(props: any) => {
             const { x, y, width, height, payload } = props
             if (!payload) return null
-            const color = payload.isUp ? '#10b981' : '#ef4444'
+            const color = payload.isUp ? EO_GREEN : EO_RED
             return (
               <g>
-                {/* Wick */}
                 <line
                   x1={x + width / 2}
                   y1={y - 2}
@@ -127,7 +130,6 @@ export function TradingChart() {
                   stroke={color}
                   strokeWidth={1}
                 />
-                {/* Body */}
                 <rect
                   x={x}
                   y={y}
@@ -139,15 +141,15 @@ export function TradingChart() {
               </g>
             )
           }} />
-          <ReferenceLine y={currentPrice} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth={1} />
+          <ReferenceLine y={currentPrice} stroke={EO_BLUE} strokeDasharray="3 3" strokeWidth={1} />
         </ComposedChart>
       </ResponsiveContainer>
       <div className="px-4">
         <ResponsiveContainer width="100%" height="18%">
           <ComposedChart data={chartData} margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
             <XAxis dataKey="time" tick={false} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 8 }} />
-            <Bar dataKey="volume" fill="#6366f1" opacity={0.5} />
+            <YAxis tick={{ fontSize: 7, fill: EO_TEXT }} />
+            <Bar dataKey="volume" fill={EO_BLUE} opacity={0.4} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>

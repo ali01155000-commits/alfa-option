@@ -3,6 +3,7 @@ import { create } from 'zustand'
 // ============ TYPES ============
 export interface PriceData {
   symbol: string
+  name?: string
   price: number
   prevPrice: number
   high24h: number
@@ -10,6 +11,8 @@ export interface PriceData {
   change24h: number
   spread: number
   digits: number
+  pipSize?: number
+  category?: string
 }
 
 export interface Candle {
