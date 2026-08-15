@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id           String   @id @default(cuid())
+  balance      Float    @default(10000.0)
+  currency     String   @default("USD")
+  totalProfit  Float    @default(0.0)
+  totalLoss    Float    @default(0.0)
+  winRate      Float    @default(0.0)
+  totalTrades  Int      @default(0)
+  winningTrades Int     @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Trade {
+  id          String   @id @default(cuid())
+  pair        String
+  direction   String   // "buy" or "sell"
+  amount      Float
+  entryPrice  Float
+  exitPrice   Float?
+  profitLoss  Float?
+  status      String   @default("open") // "open", "closed", "auto"
+  strategy    String?
+  closedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Strategy {
+  id            String   @id @default(cuid())
+  name          String
+  type          String   // "ma_cross", "rsi", "macd", "scalping", "trend_follow"
+  active        Boolean  @default(false)
+  pair          String   @default("EUR/USD")
+  timeframe     String   @default("1m")
+  takeProfit    Float    @default(50.0)
+  stopLoss      Float    @default(25.0)
+  maxTrades     Int      @default(5)
+  amountPerTrade Float   @default(100.0)
+  params        String   @default("{}") // JSON string for strategy-specific params
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model AutoBotConfig {
+  id             String   @id @default(cuid())
+  enabled        Boolean  @default(false)
+  maxConcurrentTrades Int  @default(3)
+  maxDailyLoss   Float    @default(500.0)
+  maxDailyProfit Float    @default(1000.0)
+  riskPerTrade   Float    @default(2.0) // percentage
+  trailingStop   Boolean  @default(false)
+  trailingStopPct Float   @default(1.5)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
