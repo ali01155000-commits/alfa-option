@@ -13,7 +13,7 @@ export interface PriceData {
   digits: number
   pipSize?: number
   category?: string
-  payoutPercent?: number  // Options payout % (e.g. 82 means 82% profit on win)
+  payoutPercent?: number
 }
 
 export interface Candle {
@@ -28,19 +28,19 @@ export interface Candle {
 export interface TradeData {
   id: string
   pair: string
-  direction: 'buy' | 'sell'   // buy = CALL (price goes up), sell = PUT (price goes down)
+  direction: 'buy' | 'sell'
   entryPrice: number
-  amount: number              // Trade amount in USD ($1-$100)
-  payoutPercent: number       // Payout percentage (e.g. 82%)
-  expiryTime: number          // Expiry timestamp (ms)
-  expiryMinutes: number       // Expiry duration in minutes
+  amount: number
+  payoutPercent: number
+  expiryTime: number
+  expiryMinutes: number
   strategy: string
   timestamp: number
 }
 
 export interface ClosedTrade extends TradeData {
   exitPrice: number
-  pnl: number                 // +amount×payout% on win, -amount on loss
+  pnl: number
   won: boolean
 }
 
@@ -49,9 +49,9 @@ export interface StrategyConfig {
   type: string
   active: boolean
   pair: string
-  expiryMinutes: number       // Expiry time for auto trades
+  expiryMinutes: number
   maxTrades: number
-  amountPerTrade: number      // $1-$100
+  amountPerTrade: number
   params: Record<string, any>
 }
 
@@ -65,11 +65,30 @@ export interface BotConfig {
   trailingStopPct: number
 }
 
+// Expert Option connection state
+export interface EOConnection {
+  isLoggedIn: boolean
+  isDemo: boolean
+  token: string
+  realBalance: number
+  autoTrading: boolean
+  dailyPnl: number
+}
+
 // ============ STORE ============
 interface TradingStore {
   // Connection
   isConnected: boolean
   setConnected: (val: boolean) => void
+
+  // Expert Option connection
+  eoConnection: EOConnection
+  setEOConnection: (conn: Partial<EOConnection>) => void
+  eoLogin: (token: string, isDemo: boolean) => Promise<boolean>
+  eoLogout: () => Promise<void>
+  eoRefreshProfile: () => Promise<void>
+  eoPlaceTrade: (pair: string, direction: 'buy' | 'sell', amount: number, expiryMinutes: number) => Promise<boolean>
+  eoToggleAutoTrading: (enabled: boolean) => Promise<void>
 
   // Prices
   prices: Record<string, PriceData>
@@ -117,10 +136,122 @@ interface TradingStore {
   setChartType: (type: 'candle' | 'line') => void
 }
 
-export const useTradingStore = create<TradingStore>((set) => ({
+const EO_API = 'http://localhost:3004'
+
+export const useTradingStore = create<TradingStore>((set, get) => ({
   // Connection
   isConnected: false,
   setConnected: (val) => set({ isConnected: val }),
+
+  // Expert Option connection
+  eoConnection: {
+    isLoggedIn: false,
+    isDemo: true,
+    token: '',
+    realBalance: 0,
+    autoTrading: false,
+    dailyPnl: 0,
+  },
+  setEOConnection: (conn) => set((state) => ({
+    eoConnection: { ...state.eoConnection, ...conn }
+  })),
+  
+  eoLogin: async (token, isDemo) => {
+    try {
+      const res = await fetch(`${EO_API}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, is_demo: isDemo }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Connection failed' }))
+        throw new Error(err.detail || 'Login failed')
+      }
+      const data = await res.json()
+      set({
+        eoConnection: {
+          isLoggedIn: true,
+          isDemo,
+          token,
+          realBalance: data.balance || 10000,
+          autoTrading: false,
+          dailyPnl: 0,
+        },
+        balance: data.balance || 10000,
+      })
+      return true
+    } catch (e) {
+      console.error('EO Login error:', e)
+      set({
+        eoConnection: {
+          isLoggedIn: false,
+          isDemo: true,
+          token: '',
+          realBalance: 0,
+          autoTrading: false,
+          dailyPnl: 0,
+        }
+      })
+      return false
+    }
+  },
+
+  eoLogout: async () => {
+    try {
+      await fetch(`${EO_API}/api/logout`, { method: 'POST' })
+    } catch {}
+    set({
+      eoConnection: {
+        isLoggedIn: false,
+        isDemo: true,
+        token: '',
+        realBalance: 0,
+        autoTrading: false,
+        dailyPnl: 0,
+      }
+    })
+  },
+
+  eoRefreshProfile: async () => {
+    try {
+      const res = await fetch(`${EO_API}/api/profile`)
+      if (res.ok) {
+        const data = await res.json()
+        set((state) => ({
+          eoConnection: { ...state.eoConnection, realBalance: data.balance },
+          balance: data.balance,
+        }))
+      }
+    } catch {}
+  },
+
+  eoPlaceTrade: async (pair, direction, amount, expiryMinutes) => {
+    try {
+      const res = await fetch(`${EO_API}/api/trade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pair, direction, amount, expiryMinutes }),
+      })
+      if (!res.ok) return false
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  eoToggleAutoTrading: async (enabled) => {
+    try {
+      await fetch(`${EO_API}/api/auto-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      set((state) => ({
+        eoConnection: { ...state.eoConnection, autoTrading: enabled },
+        botConfig: { ...state.botConfig, enabled },
+      }))
+    } catch {}
+  },
 
   // Prices
   prices: {},

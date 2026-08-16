@@ -20,6 +20,7 @@ import {
   WifiOff,
   CandlestickChart,
   TrendingUp,
+  LogOut,
 } from 'lucide-react'
 
 export default function TradingPlatform() {
@@ -32,7 +33,32 @@ export default function TradingPlatform() {
     setActiveView,
     chartType,
     setChartType,
+    eoConnection,
+    eoLogout,
   } = useTradingStore()
+
+  // Redirect to login if not logged in to Expert Option
+  if (!eoConnection.isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-[#272E4A] flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-[#2F96F0] flex items-center justify-center mx-auto shadow-lg shadow-[#2F96F0]/30">
+            <TrendingUp className="w-9 h-9 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-[#F5F5F5]">Alfa Expert</h1>
+            <p className="text-sm text-[#A9B5CB] mt-1">يجب تسجيل الدخول أولاً</p>
+          </div>
+          <Button
+            onClick={() => window.location.href = '/login'}
+            className="bg-[#2F96F0] hover:bg-[#1A7DE8] text-white font-bold px-8 h-11"
+          >
+            تسجيل الدخول إلى Expert Option
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   const currentPrice = prices[selectedPair]
   const isUp = currentPrice ? currentPrice.price >= currentPrice.prevPrice : true
@@ -48,7 +74,9 @@ export default function TradingPlatform() {
             </div>
             <div>
               <h1 className="text-sm font-bold leading-tight text-[#F5F5F5]">Alfa Expert</h1>
-              <p className="text-[9px] text-[#A9B5CB]">Alfa Expert Trading</p>
+              <p className="text-[9px] text-[#A9B5CB]">
+                {eoConnection.isDemo ? '🎮 تجريبي' : '💰 حقيقي'} • رصيد: ${eoConnection.realBalance.toLocaleString()}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -62,6 +90,14 @@ export default function TradingPlatform() {
                 <><WifiOff className="w-3 h-3 mr-1" />غير متصل</>
               )}
             </Badge>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={eoLogout}
+              className="h-7 w-7 p-0 text-[#D0011B] hover:text-[#D0011B] hover:bg-[#D0011B]/10"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </Button>
           </div>
         </div>
       </header>
