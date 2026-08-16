@@ -22,8 +22,11 @@ const expiryOptions = [
 
 const quickAmounts = [1, 5, 10, 25, 50, 100]
 
+const EO_API = 'http://localhost:3004'
+
 export function TradingPanel({ emit }: TradingPanelProps) {
-  const { selectedPair, prices, balance } = useTradingStore()
+  const { selectedPair, prices, balance, eoConnection, eoPlaceTrade } = useTradingStore()
+  const isLoggedIn = eoConnection.isLoggedIn
   const [amount, setAmount] = useState('10')
   const [expiryMinutes, setExpiryMinutes] = useState(1)
   const [tradeDirection, setTradeDirection] = useState<'buy' | 'sell' | null>(null)
@@ -51,18 +54,28 @@ export function TradingPanel({ emit }: TradingPanelProps) {
     }
   }
 
-  const handleTrade = (direction: 'buy' | 'sell') => {
+  const handleTrade = async (direction: 'buy' | 'sell') => {
     if (!currentPrice) return
     const amt = Math.min(Math.max(parseFloat(amount) || 1, 1), 100)
     setTradeDirection(direction)
 
-    emit('manual-trade', {
-      pair: selectedPair,
-      direction,
-      amount: amt,
-      payoutPercent,
-      expiryMinutes
-    })
+    if (isLoggedIn) {
+      // Real trade via Python bridge
+      const success = await eoPlaceTrade(selectedPair, direction, amt, expiryMinutes)
+      if (!success) {
+        setTradeDirection(null)
+        return
+      }
+    } else {
+      // Simulated trade via WS
+      emit('manual-trade', {
+        pair: selectedPair,
+        direction,
+        amount: amt,
+        payoutPercent,
+        expiryMinutes
+      })
+    }
 
     setTimeout(() => setTradeDirection(null), 1500)
   }
@@ -73,7 +86,7 @@ export function TradingPanel({ emit }: TradingPanelProps) {
         <CardTitle className="flex items-center justify-between text-sm text-[#F5F5F5]">
           <span className="font-bold">{selectedPair}</span>
           <Badge variant="outline" className="text-[10px] text-[#57BC9A] border-[#57BC9A]/40 bg-[#57BC9A]/10">
-            رصيد: ${balance.toLocaleString()}
+            رصيد: ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </Badge>
         </CardTitle>
       </CardHeader>

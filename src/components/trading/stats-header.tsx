@@ -5,7 +5,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { TrendingUp, TrendingDown, Wallet, BarChart3, Bot } from 'lucide-react'
 
 export function StatsHeader() {
-  const { balance, totalPnL, openTrades, botConfig, tradeHistory, prices } = useTradingStore()
+  const { balance, totalPnL, openTrades, botConfig, tradeHistory, prices, eoConnection } = useTradingStore()
+  const isLoggedIn = eoConnection.isLoggedIn
 
   // Options-style unrealized PnL: based on trade direction vs price movement
   const unrealizedPnL = openTrades.reduce((sum, trade) => {

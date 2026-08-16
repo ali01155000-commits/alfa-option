@@ -75,7 +75,7 @@ export default function TradingPlatform() {
             <div>
               <h1 className="text-sm font-bold leading-tight text-[#F5F5F5]">Alfa Expert</h1>
               <p className="text-[9px] text-[#A9B5CB]">
-                {eoConnection.isDemo ? '🎮 تجريبي' : '💰 حقيقي'} • رصيد: ${eoConnection.realBalance.toLocaleString()}
+                {eoConnection.isDemo ? '🎮 تجريبي' : '💰 حقيقي'} • رصيد: ${eoConnection.realBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
           </div>
@@ -212,16 +212,18 @@ export default function TradingPlatform() {
                 <h3 className="text-xs font-bold mb-2 text-[#F5F5F5]">معلومات الحساب</h3>
                 <div className="space-y-1.5">
                   {[
-                    ['الرصيد', '$10,000.00'],
+                    ['الرصيد', `$${eoConnection.realBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
                     ['العملة', 'USD'],
-                    ['النوع', 'تجريبي (Demo)'],
+                    ['النوع', eoConnection.isDemo ? '🎮 تجريبي (Demo)' : '💰 حقيقي (Real)'],
                     ['نوع التداول', 'أوبشن (خيارات)'],
                     ['الحد الأدنى', '$1'],
                     ['الحد الأقصى', '$100'],
+                    ['حالة البوت', eoConnection.autoTrading ? '🟢 يعمل' : '🔴 متوقف'],
+                    ['ربح/خسارة اليوم', `$${eoConnection.dailyPnl.toFixed(2)}`],
                   ].map(([k, v]) => (
                     <div key={k} className="flex justify-between text-[11px]">
                       <span className="text-[#A9B5CB]">{k}</span>
-                      <span className="font-mono font-bold text-[#F5F5F5]">{v}</span>
+                      <span className={`font-mono font-bold ${k === 'ربح/خسارة اليوم' ? (eoConnection.dailyPnl >= 0 ? 'text-[#57BC9A]' : 'text-[#D0011B]') : 'text-[#F5F5F5]'}`}>{v}</span>
                     </div>
                   ))}
                 </div>

@@ -9,34 +9,38 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
-import { Bot, Play, Plus, Trash2, Settings } from 'lucide-react'
+import { Bot, Play, Plus, Trash2, Settings, Zap, TrendingUp, TrendingDown, Activity } from 'lucide-react'
 
 interface AutoBotPanelProps {
   emit: (event: string, data?: any) => void
 }
 
 const strategyTypes = [
-  { value: 'ma_cross', label: 'تقاطع المتوسطات', desc: 'MA Cross' },
-  { value: 'rsi', label: 'مؤشر القوة النسبية', desc: 'RSI' },
-  { value: 'macd', label: 'MACD', desc: 'MACD' },
-  { value: 'scalping', label: 'سكالبينج', desc: 'Scalping' },
-  { value: 'trend_follow', label: 'متابعة الاتجاه', desc: 'Trend' },
+  { value: 'ma_cross', label: 'تقاطع المتوسطات', desc: 'MA Cross', icon: '📊' },
+  { value: 'rsi', label: 'مؤشر القوة النسبية', desc: 'RSI', icon: '📈' },
+  { value: 'macd', label: 'MACD', desc: 'MACD', icon: '📉' },
+  { value: 'scalping', label: 'سكالبينج', desc: 'Scalping', icon: '⚡' },
+  { value: 'trend_follow', label: 'متابعة الاتجاه', desc: 'Trend', icon: '🎯' },
 ]
 
 const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'USD/CHF', 'NZD/USD', 'BTC/USD', 'ETH/USD']
 
 const expiryOptions = [
-  { value: 1, label: '1 دقيقة' },
-  { value: 2, label: '2 دقيقة' },
-  { value: 5, label: '5 دقائق' },
-  { value: 10, label: '10 دقائق' },
-  { value: 15, label: '15 دقيقة' },
+  { value: 1, label: '1 د' },
+  { value: 2, label: '2 د' },
+  { value: 5, label: '5 د' },
+  { value: 10, label: '10 د' },
+  { value: 15, label: '15 د' },
 ]
 
 const amountOptions = [1, 5, 10, 25, 50, 100]
 
+const EO_API = 'http://localhost:3004'
+
 export function AutoBotPanel({ emit }: AutoBotPanelProps) {
-  const { botConfig, strategies } = useTradingStore()
+  const { botConfig, strategies, eoConnection, eoToggleAutoTrading } = useTradingStore()
+  const isLoggedIn = eoConnection.isLoggedIn
+
   const [newStrategy, setNewStrategy] = useState<StrategyConfig>({
     name: '',
     type: 'ma_cross',
@@ -48,14 +52,51 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
     params: {}
   })
   const [showAddStrategy, setShowAddStrategy] = useState(false)
+  const [configLoading, setConfigLoading] = useState(false)
 
-  const handleToggleBot = (enabled: boolean) => {
-    emit('toggle-bot', { enabled })
+  // Send config to Python bridge
+  const sendBridgeConfig = async (updates: Record<string, any>) => {
+    if (!isLoggedIn) return
+    try {
+      setConfigLoading(true)
+      await fetch(`${EO_API}/api/auto-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+    } catch (e) {
+      console.error('Bridge config error:', e)
+    } finally {
+      setConfigLoading(false)
+    }
+  }
+
+  const handleToggleBot = async (enabled: boolean) => {
+    if (isLoggedIn) {
+      // Real mode: send to Python bridge
+      await eoToggleAutoTrading(enabled)
+      await sendBridgeConfig({ enabled })
+    } else {
+      // Simulated mode: emit to WS server
+      emit('toggle-bot', { enabled })
+    }
   }
 
   const handleAddStrategy = () => {
     if (!newStrategy.name.trim()) return
-    emit('add-strategy', newStrategy)
+
+    if (isLoggedIn) {
+      // Send strategy config to Python bridge
+      sendBridgeConfig({
+        strategy: newStrategy.type,
+        pair: newStrategy.pair,
+        amount: newStrategy.amountPerTrade,
+        expiryMinutes: newStrategy.expiryMinutes,
+      })
+    } else {
+      emit('add-strategy', newStrategy)
+    }
+
     setNewStrategy({
       name: '',
       type: 'ma_cross',
@@ -70,15 +111,29 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
   }
 
   const handleRemoveStrategy = (id: string) => {
-    emit('remove-strategy', { id })
+    if (!isLoggedIn) {
+      emit('remove-strategy', { id })
+    }
   }
 
   const handleToggleStrategy = (id: string, active: boolean) => {
-    emit('toggle-strategy', { id, active })
+    if (!isLoggedIn) {
+      emit('toggle-strategy', { id, active })
+    }
   }
 
   const handleUpdateBotConfig = (updates: Partial<typeof botConfig>) => {
-    emit('update-bot-config', updates)
+    if (isLoggedIn) {
+      // Map to bridge config
+      const bridgeUpdates: Record<string, any> = {}
+      if (updates.maxConcurrentTrades !== undefined) bridgeUpdates.maxConcurrentTrades = updates.maxConcurrentTrades
+      if (updates.maxDailyLoss !== undefined) bridgeUpdates.maxDailyLoss = updates.maxDailyLoss
+      if (updates.maxDailyProfit !== undefined) bridgeUpdates.maxDailyProfit = updates.maxDailyProfit
+      if (updates.riskPerTrade !== undefined) bridgeUpdates.amount = updates.riskPerTrade
+      sendBridgeConfig(bridgeUpdates)
+    } else {
+      emit('update-bot-config', updates)
+    }
   }
 
   const strategyList = Object.entries(strategies)
@@ -92,6 +147,11 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
             <div className="flex items-center gap-1.5">
               <Bot className="w-4 h-4 text-[#2F96F0]" />
               <span>روبوت التداول الآلي (أوبشن)</span>
+              {isLoggedIn && (
+                <Badge className="text-[8px] bg-[#2F96F0]/20 text-[#2F96F0] border-[#2F96F0]/30" variant="outline">
+                  Expert Option
+                </Badge>
+              )}
             </div>
             <Badge className={`text-[9px] ${botConfig.enabled ? 'bg-[#57BC9A]/20 text-[#57BC9A] border-[#57BC9A]/30' : 'bg-[#20283D] text-[#A9B5CB] border-[#3A4568]'}`} variant="outline">
               {botConfig.enabled ? '🟢 نشط' : '⏸ متوقف'}
@@ -100,12 +160,41 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-[#A9B5CB]">تفعيل الروبوت</span>
+            <div>
+              <span className="text-[11px] text-[#A9B5CB]">تفعيل الروبوت</span>
+              {isLoggedIn && (
+                <p className="text-[9px] text-[#2F96F0]/70">الصفقات ستكون حقيقية على Expert Option</p>
+              )}
+            </div>
             <Switch
               checked={botConfig.enabled}
               onCheckedChange={handleToggleBot}
             />
           </div>
+
+          {/* Real-time info when logged in */}
+          {isLoggedIn && eoConnection.autoTrading && (
+            <div className="bg-[#57BC9A]/8 border border-[#57BC9A]/20 rounded-lg p-2.5">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <Activity className="w-3 h-3 text-[#57BC9A]" />
+                <span className="text-[10px] font-bold text-[#57BC9A]">البوت يعمل الآن</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[9px]">
+                <div>
+                  <span className="text-[#A9B5CB]">ربح اليوم:</span>
+                  <span className={`font-mono font-bold mr-1 ${eoConnection.dailyPnl >= 0 ? 'text-[#57BC9A]' : 'text-[#D0011B]'}`}>
+                    ${eoConnection.dailyPnl.toFixed(2)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[#A9B5CB]">رصيدك:</span>
+                  <span className="font-mono font-bold text-[#F5F5F5] mr-1">
+                    ${eoConnection.realBalance.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Risk Management */}
           <div className="space-y-2.5 pt-2 border-t border-[#3A4568]">
@@ -170,7 +259,7 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
       <Card className="border-[#3A4568] bg-[#2D3651]">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center justify-between text-sm text-[#F5F5F5]">
-            <span>الاستراتيجيات النشطة</span>
+            <span>الاستراتيجيات</span>
             <Button
               size="sm"
               variant="outline"
@@ -183,9 +272,22 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* Available strategies preview */}
+          <div className="grid grid-cols-5 gap-1">
+            {strategyTypes.map((st) => (
+              <div
+                key={st.value}
+                className="text-center py-1.5 px-1 bg-[#20283D] rounded border border-[#3A4568]/50"
+              >
+                <div className="text-sm">{st.icon}</div>
+                <div className="text-[8px] text-[#A9B5CB] mt-0.5">{st.desc}</div>
+              </div>
+            ))}
+          </div>
+
           {/* Strategy List */}
           {strategyList.length === 0 ? (
-            <div className="text-center py-4 text-[#A9B5CB] text-sm">
+            <div className="text-center py-3 text-[#A9B5CB] text-sm">
               <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
               <p>لا توجد استراتيجيات</p>
               <p className="text-xs">أضف استراتيجية لبدء التداول الآلي</p>
@@ -239,7 +341,7 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
                 <SelectContent>
                   {strategyTypes.map((st) => (
                     <SelectItem key={st.value} value={st.value}>
-                      {st.label} ({st.desc})
+                      {st.icon} {st.label} ({st.desc})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -278,7 +380,7 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
                 </div>
               </div>
 
-              {/* Amount per trade - Options style */}
+              {/* Amount per trade */}
               <div>
                 <label className="text-[10px] text-[#A9B5CB] mb-1 block">مبلغ الصفقة ($1 - $100)</label>
                 <div className="grid grid-cols-6 gap-1">
