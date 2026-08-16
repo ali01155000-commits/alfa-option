@@ -278,6 +278,11 @@ class LoginRequest(BaseModel):
     token: str
     is_demo: bool = True
 
+class EmailLoginRequest(BaseModel):
+    email: str
+    password: str
+    is_demo: bool = True
+
 class TradeRequest(BaseModel):
     pair: str
     direction: str
@@ -536,6 +541,216 @@ def trade_expiry_loop():
         time.sleep(5)
 
 
+# ============ Auto-Login with Playwright ============
+def auto_login_expertoption(email: str, password: str) -> Optional[str]:
+    """
+    Automatically login to Expert Option using Playwright headless browser.
+    Returns the SSID token if successful, None if failed.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+        PLAYWRIGHT_AVAILABLE = True
+    except ImportError:
+        PLAYWRIGHT_AVAILABLE = False
+        logger.error("Playwright not available for auto-login")
+        return None
+
+    ssid_token = None
+    logger.info(f"🌐 Auto-login: Opening Expert Option for {email[:5]}...")
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            )
+            context = browser.new_context(
+                viewport={'width': 1280, 'height': 720},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+            page = context.new_page()
+
+            # Go to Expert Option login page
+            logger.info("🌐 Navigating to Expert Option login page...")
+            page.goto('https://expertoption.com/login', wait_until='domcontentloaded', timeout=30000)
+            page.wait_for_timeout(2000)
+
+            # Try to find and fill the email field
+            # Expert Option uses various selectors - try multiple
+            email_filled = False
+            password_filled = False
+
+            # Attempt 1: Common input selectors
+            email_selectors = [
+                'input[type="email"]',
+                'input[name="email"]',
+                'input[id="email"]',
+                'input[placeholder*="email" i]',
+                'input[placeholder*="Email" i]',
+                'input.form-input:first-of-type',
+                'input[type="text"]:first-of-type',
+            ]
+
+            for selector in email_selectors:
+                try:
+                    el = page.query_selector(selector)
+                    if el and el.is_visible():
+                        el.click()
+                        el.fill(email)
+                        email_filled = True
+                        logger.info(f"✅ Email filled with selector: {selector}")
+                        break
+                except:
+                    continue
+
+            if not email_filled:
+                # Try to find any visible input and use the first one for email
+                try:
+                    inputs = page.query_selector_all('input:not([type="hidden"]):not([type="checkbox"])')
+                    visible_inputs = [i for i in inputs if i.is_visible()]
+                    if len(visible_inputs) >= 1:
+                        visible_inputs[0].click()
+                        visible_inputs[0].fill(email)
+                        email_filled = True
+                        logger.info("✅ Email filled (fallback method)")
+                except Exception as e:
+                    logger.error(f"Could not find email input: {e}")
+
+            page.wait_for_timeout(500)
+
+            # Fill password
+            password_selectors = [
+                'input[type="password"]',
+                'input[name="password"]',
+                'input[id="password"]',
+                'input[placeholder*="password" i]',
+                'input[placeholder*="Password" i]',
+            ]
+
+            for selector in password_selectors:
+                try:
+                    el = page.query_selector(selector)
+                    if el and el.is_visible():
+                        el.click()
+                        el.fill(password)
+                        password_filled = True
+                        logger.info(f"✅ Password filled with selector: {selector}")
+                        break
+                except:
+                    continue
+
+            if not password_filled:
+                try:
+                    inputs = page.query_selector_all('input[type="password"]')
+                    visible_pwd = [i for i in inputs if i.is_visible()]
+                    if visible_pwd:
+                        visible_pwd[0].click()
+                        visible_pwd[0].fill(password)
+                        password_filled = True
+                        logger.info("✅ Password filled (fallback)")
+                except Exception as e:
+                    logger.error(f"Could not find password input: {e}")
+
+            if not email_filled or not password_filled:
+                logger.error(f"❌ Could not fill form. Email: {email_filled}, Password: {password_filled}")
+                # Take screenshot for debugging
+                try:
+                    page.screenshot(path='/tmp/eo-login-debug.png')
+                    logger.info("📸 Debug screenshot saved to /tmp/eo-login-debug.png")
+                except:
+                    pass
+                browser.close()
+                return None
+
+            # Click login button
+            page.wait_for_timeout(500)
+
+            login_selectors = [
+                'button[type="submit"]',
+                'button:has-text("Log In")',
+                'button:has-text("Login")',
+                'button:has-text("Sign In")',
+                'button:has-text("تسجيل")',
+                'input[type="submit"]',
+                '.login-btn',
+                'button.btn-primary',
+            ]
+
+            login_clicked = False
+            for selector in login_selectors:
+                try:
+                    el = page.query_selector(selector)
+                    if el and el.is_visible():
+                        el.click()
+                        login_clicked = True
+                        logger.info(f"✅ Login button clicked: {selector}")
+                        break
+                except:
+                    continue
+
+            if not login_clicked:
+                # Try pressing Enter
+                try:
+                    page.keyboard.press('Enter')
+                    login_clicked = True
+                    logger.info("✅ Login submitted with Enter key")
+                except:
+                    pass
+
+            if not login_clicked:
+                logger.error("❌ Could not find login button")
+                browser.close()
+                return None
+
+            # Wait for login to complete (page navigation or cookie set)
+            logger.info("⏳ Waiting for login to complete...")
+            try:
+                # Wait for either URL change or cookie appearance
+                for _ in range(30):  # 30 seconds max
+                    page.wait_for_timeout(1000)
+
+                    # Check cookies for SSID
+                    cookies = context.cookies()
+                    for cookie in cookies:
+                        if cookie.get('name') == 'ssid' and cookie.get('value'):
+                            ssid_token = cookie['value']
+                            logger.info(f"✅ SSID token found! Length: {len(ssid_token)}")
+                            break
+
+                    if ssid_token:
+                        break
+
+                    # Also check if we got redirected to the main app
+                    current_url = page.url
+                    if 'app.expertoption.com' in current_url or ('expertoption.com' in current_url and '/login' not in current_url):
+                        logger.info(f"✅ Redirected to: {current_url}")
+                        # Check cookies again after redirect
+                        cookies = context.cookies()
+                        for cookie in cookies:
+                            if cookie.get('name') == 'ssid' and cookie.get('value'):
+                                ssid_token = cookie['value']
+                                logger.info(f"✅ SSID token found after redirect! Length: {len(ssid_token)}")
+                                break
+                        if ssid_token:
+                            break
+
+            except Exception as e:
+                logger.error(f"Login wait error: {e}")
+
+            browser.close()
+
+    except Exception as e:
+        logger.error(f"❌ Auto-login error: {e}")
+        return None
+
+    if ssid_token:
+        logger.info(f"🎉 Auto-login successful! Token: {ssid_token[:10]}...")
+    else:
+        logger.warning("⚠️ Auto-login: Could not obtain SSID token")
+
+    return ssid_token
+
+
 # ============ API Endpoints ============
 @app.get("/api/status")
 def get_status():
@@ -551,7 +766,107 @@ def get_status():
         "activeStrategy": state.active_strategy.name if state.active_strategy else None,
         "pricesCached": len(state.price_cache),
         "wsClients": len(state.ws_clients),
+        "playwrightAvailable": True,  # Playwright is installed
     }
+
+
+@app.post("/api/login-email")
+def login_with_email(req: EmailLoginRequest):
+    """
+    Login to Expert Option using email & password.
+    Uses Playwright headless browser to automate the login process
+    and extract the SSID token from cookies.
+    """
+    import concurrent.futures
+    
+    if not req.email or not req.password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+
+    logger.info(f"📧 Auto-login request for: {req.email[:5]}***@{req.email.split('@')[-1] if '@' in req.email else '...'}")
+
+    # Run Playwright in a thread pool (it's synchronous)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(auto_login_expertoption, req.email, req.password)
+        try:
+            ssid_token = future.result(timeout=60)  # 60 second timeout
+        except concurrent.futures.TimeoutError:
+            raise HTTPException(status_code=408, detail="Login timed out - took more than 60 seconds")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Auto-login error: {str(e)}")
+
+    if not ssid_token:
+        raise HTTPException(
+            status_code=401, 
+            detail="Auto-login failed - could not obtain SSID token. Check your email/password or try the manual token method."
+        )
+
+    # Now connect with the obtained token
+    if not EO_AVAILABLE:
+        raise HTTPException(status_code=500, detail="ExpertOptionAPI not installed")
+
+    try:
+        # Disconnect existing connection
+        if state.api and state.connected:
+            try:
+                state.api.websocket_client.wss.close()
+            except:
+                pass
+
+        logger.info(f"🔐 Connecting with auto-obtained token: {ssid_token[:10]}...")
+
+        api = EoApi(token=ssid_token, server_region="wss://fr24g1eu.expertoption.com/")
+        result = api.connect()
+
+        if result is False:
+            raise HTTPException(status_code=401, detail="Connection failed with auto-obtained token")
+
+        state.api = api
+        state.token = ssid_token
+        state.connected = True
+        state.is_demo = req.is_demo
+
+        if req.is_demo:
+            try:
+                api.SetDemo()
+                logger.info("🎮 Demo mode activated")
+            except:
+                pass
+
+        # Get profile
+        time.sleep(3)
+        try:
+            profile = api.Profile()
+            state.profile_data = profile
+            if isinstance(profile, dict):
+                state.balance = float(profile.get("balance", 0))
+            elif isinstance(profile, (int, float)):
+                state.balance = float(profile)
+            else:
+                try:
+                    if hasattr(global_value, 'balance'):
+                        state.balance = float(global_value.balance)
+                except:
+                    state.balance = 10000 if req.is_demo else 0
+        except Exception as e:
+            logger.warning(f"Profile fetch error: {e}")
+            state.balance = 10000 if req.is_demo else 0
+
+        logger.info(f"✅ Auto-login successful! Balance: ${state.balance:.2f}")
+
+        return {
+            "success": True,
+            "balance": state.balance,
+            "is_demo": req.is_demo,
+            "autoLogin": True,
+            "tokenLength": len(ssid_token),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Auto-login connection error: {e}")
+        state.connected = False
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/login")

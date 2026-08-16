@@ -196,6 +196,36 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
     }
   },
 
+  eoEmailLogin: async (email, password, isDemo) => {
+    try {
+      const res = await fetch(`${EO_API}/api/login-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, is_demo: isDemo }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Auto-login failed' }))
+        throw new Error(err.detail || 'Login failed')
+      }
+      const data = await res.json()
+      set({
+        eoConnection: {
+          isLoggedIn: true,
+          isDemo,
+          token: 'auto-login',
+          realBalance: data.balance || 10000,
+          autoTrading: false,
+          dailyPnl: 0,
+        },
+        balance: data.balance || 10000,
+      })
+      return true
+    } catch (e) {
+      console.error('EO Email Login error:', e)
+      return false
+    }
+  },
+
   eoLogout: async () => {
     try {
       await fetch(`${EO_API}/api/logout`, { method: 'POST' })
