@@ -33,7 +33,13 @@ export function useTradingSocket() {
   useEffect(() => {
     if (eoConnection.isLoggedIn) return
 
-    const socketInstance = io('/?XTransformPort=3003', {
+    // In production, Caddy routes /socket.io/* to port 3003
+    // In dev, use XTransformPort query param
+    const socketUrl = typeof window !== 'undefined' && window.location.port !== '3000'
+      ? '/'  // Production: Caddy handles routing
+      : '/?XTransformPort=3003'  // Dev: use query param
+
+    const socketInstance = io(socketUrl, {
       transports: ['websocket', 'polling'],
       forceNew: true,
       reconnection: true,
@@ -114,11 +120,14 @@ export function useTradingSocket() {
     if (!eoConnection.isLoggedIn) return
 
     setConnected(true)
-    const BRIDGE = 'http://localhost:3004'
+    // Dynamic API URL - works both locally and online
+    const BRIDGE = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3004'
+    const wsProtocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsHost = typeof window !== 'undefined' ? window.location.host : 'localhost:3004'
 
     // Connect to bridge WebSocket for real-time events
     try {
-      const ws = new WebSocket(`ws://localhost:3004/ws`)
+      const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws`)
       bridgeWsRef.current = ws
 
       ws.onopen = () => {

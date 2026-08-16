@@ -1,10 +1,36 @@
+# Trading Platform - Production Configuration
+# Caddy reverse proxy for all services
+
 :81 {
-	@transform_port_query {
-		query XTransformPort=*
+	# WebSocket for Simulated Trading (Socket.IO on port 3003)
+	@ws_simulated path /socket.io/*
+	handle @ws_simulated {
+		reverse_proxy localhost:3003 {
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+			# Flush immediately for WebSocket
+			flush_interval -1
+		}
 	}
 
-	handle @transform_port_query {
-		reverse_proxy localhost:{query.XTransformPort} {
+	# WebSocket for Real Expert Option Bridge (port 3004)
+	@ws_real path /ws
+	handle @ws_real {
+		reverse_proxy localhost:3004 {
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+			flush_interval -1
+		}
+	}
+
+	# API requests for Expert Option Bridge (port 3004)
+	@api_eo path /api/*
+	handle @api_eo {
+		reverse_proxy localhost:3004 {
 			header_up Host {host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
@@ -12,6 +38,21 @@
 		}
 	}
 
+	# Legacy transform port query parameter support
+	@transform_port_query {
+		query XTransformPort=*
+	}
+	handle @transform_port_query {
+		reverse_proxy localhost:{query.XTransformPort} {
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+			flush_interval -1
+		}
+	}
+
+	# Default: Next.js App (port 3000)
 	handle {
 		reverse_proxy localhost:3000 {
 			header_up Host {host}

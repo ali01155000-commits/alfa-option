@@ -16,10 +16,17 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Alfa Expert - تداول آلي ذكي",
   description: "منصة Alfa Expert للتداول الآلي المتقدم لأزواج العملات مع روبوت تداول ذكي واستراتيجيات متعددة",
-  keywords: ["تداول", "فوركس", "تداول آلي", "روبوت تداول", "أزواج عملات", "Alfa Expert"],
+  keywords: ["تداول", "options", "تداول آلي", "روبوت تداول", "أزواج عملات", "Alfa Expert"],
   authors: [{ name: "Alfa Expert" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
+  },
+  manifest: "/manifest.json",
+  other: {
+    "mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-status-bar-style": "black-translucent",
+    "apple-mobile-web-app-title": "Alfa Expert",
   },
 };
 
@@ -29,7 +36,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ar" suppressHydrationWarning>
+    <html lang="ar" dir="rtl" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >

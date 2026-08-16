@@ -1,0 +1,1124 @@
+     1→"""
+     2→Expert Option Bridge Server v2.0
+     3→- FastAPI HTTP endpoints for login, trade, config
+     4→- FastAPI native WebSocket for real-time price streaming & trade updates
+     5→- Real auto-trading strategies (MA Cross, RSI, MACD, Scalping, Trend Follow)
+     6→- Connects to Expert Option via ExpertOptionAPI
+     7→"""
+     8→import os
+     9→import sys
+    10→import json
+    11→import time
+    12→import math
+    13→import threading
+    14→import logging
+    15→import asyncio
+    16→from typing import Optional, Dict, List, Any, Set
+    17→from collections import deque
+    18→from datetime import datetime
+    19→
+    20→from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+    21→from fastapi.middleware.cors import CORSMiddleware
+    22→from pydantic import BaseModel
+    23→import uvicorn
+    24→
+    25→# ============ Expert Option API ============
+    26→try:
+    27→    from ExpertOptionAPI.expert import EoApi
+    28→    import ExpertOptionAPI.api.global_values as global_value
+    29→    EO_AVAILABLE = True
+    30→    print("✅ ExpertOptionAPI loaded successfully")
+    31→except ImportError:
+    32→    EO_AVAILABLE = False
+    33→    print("⚠️ ExpertOptionAPI not available, running in simulation mode")
+    34→
+    35→# ============ Logging ============
+    36→logging.basicConfig(
+    37→    level=logging.INFO,
+    38→    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    39→    datefmt='%H:%M:%S'
+    40→)
+    41→logger = logging.getLogger("eo-bridge")
+    42→
+    43→# ============ Asset Mapping ============
+    44→ASSET_MAP = {
+    45→    "EUR/USD": 240, "GBP/USD": 241, "USD/JPY": 242, "AUD/USD": 243,
+    46→    "USD/CAD": 244, "EUR/GBP": 245, "EUR/JPY": 246, "GBP/JPY": 247,
+    47→    "USD/CHF": 248, "NZD/USD": 249, "EUR/AUD": 250, "GBP/CAD": 251,
+    48→    "EUR/CHF": 252, "AUD/JPY": 253, "USD/TRY": 1, "USD/ZAR": 2,
+    49→    "USD/SGD": 5, "USD/HKD": 6, "EUR/TRY": 7,
+    50→    "BTC/USD": 3, "ETH/USD": 4,
+    51→}
+    52→ASSET_MAP_REVERSE = {v: k for k, v in ASSET_MAP.items()}
+    53→
+    54→# ============ Strategy Implementations ============
+    55→class BaseStrategy:
+    56→    def __init__(self, name: str):
+    57→        self.name = name
+    58→        self.price_history: deque = deque(maxlen=200)
+    59→        self.last_signal: Optional[str] = None
+    60→
+    61→    def add_price(self, price: float, timestamp: float = None):
+    62→        self.price_history.append({'price': price, 'time': timestamp or time.time()})
+    63→
+    64→    def get_signal(self) -> Optional[str]:
+    65→        return None
+    66→
+    67→    def reset(self):
+    68→        self.price_history.clear()
+    69→        self.last_signal = None
+    70→
+    71→
+    72→class MACrossStrategy(BaseStrategy):
+    73→    def __init__(self, fast_period=5, slow_period=20):
+    74→        super().__init__("ma_cross")
+    75→        self.fast_period = fast_period
+    76→        self.slow_period = slow_period
+    77→
+    78→    def get_signal(self) -> Optional[str]:
+    79→        if len(self.price_history) < self.slow_period + 2:
+    80→            return None
+    81→        prices = [p['price'] for p in self.price_history]
+    82→        fast_ma = sum(prices[-self.fast_period:]) / self.fast_period
+    83→        slow_ma = sum(prices[-self.slow_period:]) / self.slow_period
+    84→        prev_fast = sum(prices[-self.fast_period-1:-1]) / self.fast_period
+    85→        prev_slow = sum(prices[-self.slow_period-1:-1]) / self.slow_period
+    86→        if prev_fast <= prev_slow and fast_ma > slow_ma:
+    87→            return 'call'
+    88→        elif prev_fast >= prev_slow and fast_ma < slow_ma:
+    89→            return 'put'
+    90→        return None
+    91→
+    92→
+    93→class RSIStrategy(BaseStrategy):
+    94→    def __init__(self, period=14, overbought=70, oversold=30):
+    95→        super().__init__("rsi")
+    96→        self.period = period
+    97→        self.overbought = overbought
+    98→        self.oversold = oversold
+    99→
+   100→    def get_signal(self) -> Optional[str]:
+   101→        if len(self.price_history) < self.period + 1:
+   102→            return None
+   103→        prices = [p['price'] for p in self.price_history]
+   104→        deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+   105→        recent = deltas[-(self.period):]
+   106→        gains = [d if d > 0 else 0 for d in recent]
+   107→        losses = [-d if d < 0 else 0 for d in recent]
+   108→        avg_gain = sum(gains) / self.period
+   109→        avg_loss = sum(losses) / self.period
+   110→        if avg_loss == 0:
+   111→            rsi = 100
+   112→        else:
+   113→            rs = avg_gain / avg_loss
+   114→            rsi = 100 - (100 / (1 + rs))
+   115→        if rsi < self.oversold:
+   116→            return 'call'
+   117→        elif rsi > self.overbought:
+   118→            return 'put'
+   119→        return None
+   120→
+   121→
+   122→class MACDStrategy(BaseStrategy):
+   123→    def __init__(self, fast=12, slow=26, signal=9):
+   124→        super().__init__("macd")
+   125→        self.fast = fast
+   126→        self.slow = slow
+   127→        self.signal = signal
+   128→
+   129→    def _ema(self, data: List[float], period: int) -> List[float]:
+   130→        if len(data) < period:
+   131→            return []
+   132→        multiplier = 2 / (period + 1)
+   133→        ema = [sum(data[:period]) / period]
+   134→        for price in data[period:]:
+   135→            ema.append((price - ema[-1]) * multiplier + ema[-1])
+   136→        return ema
+   137→
+   138→    def get_signal(self) -> Optional[str]:
+   139→        if len(self.price_history) < self.slow + self.signal + 2:
+   140→            return None
+   141→        prices = [p['price'] for p in self.price_history]
+   142→        fast_ema = self._ema(prices, self.fast)
+   143→        slow_ema = self._ema(prices, self.slow)
+   144→        min_len = min(len(fast_ema), len(slow_ema))
+   145→        if min_len < 3:
+   146→            return None
+   147→        macd_line = [f - s for f, s in zip(fast_ema[-min_len:], slow_ema[-min_len:])]
+   148→        signal_line = self._ema(macd_line, self.signal)
+   149→        if len(signal_line) < 2 or len(macd_line) < 2:
+   150→            return None
+   151→        curr_macd = macd_line[-1]
+   152→        curr_signal = signal_line[-1]
+   153→        prev_macd = macd_line[-2]
+   154→        prev_signal = signal_line[-2]
+   155→        if prev_macd <= prev_signal and curr_macd > curr_signal:
+   156→            return 'call'
+   157→        elif prev_macd >= prev_signal and curr_macd < curr_signal:
+   158→            return 'put'
+   159→        return None
+   160→
+   161→
+   162→class ScalpingStrategy(BaseStrategy):
+   163→    def __init__(self):
+   164→        super().__init__("scalping")
+   165→
+   166→    def get_signal(self) -> Optional[str]:
+   167→        if len(self.price_history) < 5:
+   168→            return None
+   169→        prices = [p['price'] for p in self.price_history]
+   170→        last3 = prices[-3:]
+   171→        if all(last3[i] > last3[i-1] for i in range(1, 3)):
+   172→            if prices[-1] - prices[-3] < (prices[-3] * 0.0003):
+   173→                return 'call'
+   174→        if all(last3[i] < last3[i-1] for i in range(1, 3)):
+   175→            if prices[-3] - prices[-1] < (prices[-3] * 0.0003):
+   176→                return 'put'
+   177→        if prices[-2] > prices[-3] and prices[-1] < prices[-2]:
+   178→            return 'put'
+   179→        if prices[-2] < prices[-3] and prices[-1] > prices[-2]:
+   180→            return 'call'
+   181→        return None
+   182→
+   183→
+   184→class TrendFollowStrategy(BaseStrategy):
+   185→    def __init__(self, ma_period=10, threshold=0.0002):
+   186→        super().__init__("trend_follow")
+   187→        self.ma_period = ma_period
+   188→        self.threshold = threshold
+   189→
+   190→    def get_signal(self) -> Optional[str]:
+   191→        if len(self.price_history) < self.ma_period + 1:
+   192→            return None
+   193→        prices = [p['price'] for p in self.price_history]
+   194→        ma = sum(prices[-self.ma_period:]) / self.ma_period
+   195→        current = prices[-1]
+   196→        deviation = (current - ma) / ma
+   197→        if deviation > self.threshold:
+   198→            return 'call'
+   199→        elif deviation < -self.threshold:
+   200→            return 'put'
+   201→        return None
+   202→
+   203→
+   204→STRATEGIES = {
+   205→    "ma_cross": MACrossStrategy,
+   206→    "rsi": RSIStrategy,
+   207→    "macd": MACDStrategy,
+   208→    "scalping": ScalpingStrategy,
+   209→    "trend_follow": TrendFollowStrategy,
+   210→}
+   211→
+   212→# ============ App State ============
+   213→class AppState:
+   214→    def __init__(self):
+   215→        self.api = None
+   216→        self.connected = False
+   217→        self.token = None
+   218→        self.is_demo = True
+   219→        self.profile_data = None
+   220→        self.balance = 0.0
+   221→        self.auto_trading = False
+   222→        self.auto_config = {
+   223→            "amount": 10,
+   224→            "expiryMinutes": 1,
+   225→            "strategy": "scalping",
+   226→            "maxConcurrentTrades": 3,
+   227→            "maxDailyLoss": 50,
+   228→            "maxDailyProfit": 100,
+   229→            "pair": "EUR/USD",
+   230→            "assetId": 240,
+   231→        }
+   232→        self.open_trades: List[Dict] = []
+   233→        self.trade_history: List[Dict] = []
+   234→        self.daily_pnl = 0.0
+   235→        self.daily_start = time.time()
+   236→        self.active_strategy: Optional[BaseStrategy] = None
+   237→        self.price_cache: Dict[str, float] = {}
+   238→        self._lock = threading.Lock()
+   239→        self.ws_clients: Set[Any] = set()  # WebSocket clients for broadcasting
+   240→        self._ws_lock = threading.Lock()
+   241→
+   242→    def reset_day(self):
+   243→        now = datetime.now()
+   244→        if now.hour == 0 and now.minute == 0:
+   245→            self.daily_pnl = 0
+   246→            self.daily_start = time.time()
+   247→
+   248→    def init_strategy(self, strategy_name: str):
+   249→        if strategy_name in STRATEGIES:
+   250→            self.active_strategy = STRATEGIES[strategy_name]()
+   251→            logger.info(f"Strategy initialized: {strategy_name}")
+   252→        else:
+   253→            self.active_strategy = ScalpingStrategy()
+   254→
+   255→    def add_ws_client(self, ws):
+   256→        with self._ws_lock:
+   257→            self.ws_clients.add(ws)
+   258→
+   259→    def remove_ws_client(self, ws):
+   260→        with self._ws_lock:
+   261→            self.ws_clients.discard(ws)
+   262→
+   263→state = AppState()
+   264→
+   265→# ============ FastAPI App ============
+   266→app = FastAPI(title="Expert Option Bridge v2.0", version="2.0")
+   267→
+   268→app.add_middleware(
+   269→    CORSMiddleware,
+   270→    allow_origins=["*"],
+   271→    allow_credentials=True,
+   272→    allow_methods=["*"],
+   273→    allow_headers=["*"],
+   274→)
+   275→
+   276→# ============ Models ============
+   277→class LoginRequest(BaseModel):
+   278→    token: str
+   279→    is_demo: bool = True
+   280→
+   281→class EmailLoginRequest(BaseModel):
+   282→    email: str
+   283→    password: str
+   284→    is_demo: bool = True
+   285→
+   286→class TradeRequest(BaseModel):
+   287→    pair: str
+   288→    direction: str
+   289→    amount: int
+   290→    expiryMinutes: int = 1
+   291→
+   292→class AutoConfigRequest(BaseModel):
+   293→    enabled: Optional[bool] = None
+   294→    amount: Optional[int] = None
+   295→    expiryMinutes: Optional[int] = None
+   296→    strategy: Optional[str] = None
+   297→    maxConcurrentTrades: Optional[int] = None
+   298→    maxDailyLoss: Optional[int] = None
+   299→    maxDailyProfit: Optional[int] = None
+   300→    pair: Optional[str] = None
+   301→
+   302→
+   303→# ============ WebSocket Endpoint ============
+   304→@app.websocket("/ws")
+   305→async def websocket_endpoint(websocket: WebSocket):
+   306→    await websocket.accept()
+   307→    state.add_ws_client(websocket)
+   308→    logger.info(f"WebSocket client connected. Total: {len(state.ws_clients)}")
+   309→
+   310→    try:
+   311→        while True:
+   312→            # Receive messages from client
+   313→            data = await websocket.receive_text()
+   314→            try:
+   315→                msg = json.loads(data)
+   316→                msg_type = msg.get("type")
+   317→
+   318→                if msg_type == "subscribe":
+   319→                    logger.info(f"Client subscribed to price updates")
+   320→                elif msg_type == "ping":
+   321→                    await websocket.send_json({"type": "pong"})
+   322→
+   323→            except json.JSONDecodeError:
+   324→                pass
+   325→    except WebSocketDisconnect:
+   326→        state.remove_ws_client(websocket)
+   327→        logger.info(f"WebSocket client disconnected. Total: {len(state.ws_clients)}")
+   328→    except Exception as e:
+   329→        state.remove_ws_client(websocket)
+   330→        logger.debug(f"WebSocket error: {e}")
+   331→
+   332→
+   333→async def broadcast_to_clients(event_type: str, data: Dict):
+   334→    """Broadcast event to all WebSocket clients"""
+   335→    with state._ws_lock:
+   336→        clients = list(state.ws_clients)
+   337→
+   338→    message = json.dumps({"type": event_type, **data})
+   339→    for client in clients:
+   340→        try:
+   341→            await client.send_text(message)
+   342→        except:
+   343→            state.remove_ws_client(client)
+   344→
+   345→
+   346→# ============ Price Polling Thread ============
+   347→def price_polling_loop():
+   348→    """Poll Expert Option for real-time prices"""
+   349→    logger.info("Price polling thread started")
+   350→
+   351→    SIM_PRICES = {
+   352→        "EUR/USD": 1.0850, "GBP/USD": 1.2650, "USD/JPY": 149.50,
+   353→        "AUD/USD": 0.6520, "USD/CAD": 1.3650, "EUR/GBP": 0.8580,
+   354→        "EUR/JPY": 162.25, "GBP/JPY": 189.10, "USD/CHF": 0.8820,
+   355→        "NZD/USD": 0.5980, "BTC/USD": 43500.0, "ETH/USD": 2350.0,
+   356→    }
+   357→
+   358→    import random
+   359→    tick = 0
+   360→
+   361→    while True:
+   362→        tick += 1
+   363→
+   364→        if state.connected and state.api and EO_AVAILABLE:
+   365→            try:
+   366→                # Try to get real prices from Expert Option global_values
+   367→                if hasattr(global_value, 'subscriptions') and global_value.subscriptions:
+   368→                    for asset_id, sub_data in global_value.subscriptions.items():
+   369→                        pair_name = ASSET_MAP_REVERSE.get(asset_id, f"ID:{asset_id}")
+   370→                        if isinstance(sub_data, dict) and 'price' in sub_data:
+   371→                            price = float(sub_data['price'])
+   372→                            state.price_cache[pair_name] = price
+   373→                        elif isinstance(sub_data, (int, float)):
+   374→                            state.price_cache[pair_name] = float(sub_data)
+   375→            except Exception as e:
+   376→                logger.debug(f"Price polling error: {e}")
+   377→
+   378→            # Balance update every 10 seconds
+   379→            if tick % 10 == 0:
+   380→                try:
+   381→                    profile = state.api.Profile()
+   382→                    if isinstance(profile, dict):
+   383→                        new_balance = float(profile.get('balance', state.balance))
+   384→                        if new_balance != state.balance:
+   385→                            state.balance = new_balance
+   386→                except:
+   387→                    pass
+   388→
+   389→        # Simulate prices if no real data
+   390→        if not state.connected or not state.price_cache:
+   391→            for pair, base in SIM_PRICES.items():
+   392→                change = random.gauss(0, base * 0.00005)
+   393→                SIM_PRICES[pair] = round(base + change, 5 if base < 10 else 2 if base > 100 else 4)
+   394→                state.price_cache[pair] = SIM_PRICES[pair]
+   395→
+   396→        time.sleep(1)
+   397→
+   398→
+   399→# ============ Auto-Trading Engine ============
+   400→def auto_trading_loop():
+   401→    logger.info("Auto-trading thread started")
+   402→    state.init_strategy(state.auto_config.get("strategy", "scalping"))
+   403→
+   404→    while True:
+   405→        if not state.auto_trading or not state.connected:
+   406→            time.sleep(2)
+   407→            continue
+   408→
+   409→        state.reset_day()
+   410→
+   411→        with state._lock:
+   412→            config = state.auto_config.copy()
+   413→            daily_pnl = state.daily_pnl
+   414→            open_count = len(state.open_trades)
+   415→
+   416→        if daily_pnl <= -config["maxDailyLoss"]:
+   417→            logger.warning(f"⛔ Max daily loss: ${daily_pnl:.2f} / -${config['maxDailyLoss']}")
+   418→            time.sleep(30)
+   419→            continue
+   420→
+   421→        if daily_pnl >= config["maxDailyProfit"]:
+   422→            logger.info(f"🎯 Max daily profit: ${daily_pnl:.2f} / ${config['maxDailyProfit']}")
+   423→            time.sleep(30)
+   424→            continue
+   425→
+   426→        if open_count >= config["maxConcurrentTrades"]:
+   427→            time.sleep(5)
+   428→            continue
+   429→
+   430→        pair = config["pair"]
+   431→        current_price = state.price_cache.get(pair)
+   432→        if not current_price:
+   433→            time.sleep(2)
+   434→            continue
+   435→
+   436→        if state.active_strategy:
+   437→            state.active_strategy.add_price(current_price)
+   438→            signal = state.active_strategy.get_signal()
+   439→
+   440→            if signal:
+   441→                direction = signal
+   442→                asset_id = ASSET_MAP.get(pair, 240)
+   443→                is_demo = 1 if state.is_demo else 0
+   444→                expiry_seconds = config["expiryMinutes"] * 60
+   445→
+   446→                logger.info(f"📊 Signal: {signal.upper()} on {pair} @ {current_price}")
+   447→
+   448→                try:
+   449→                    if EO_AVAILABLE and state.api:
+   450→                        result = state.api.Buy(
+   451→                            amount=config["amount"],
+   452→                            type=direction,
+   453→                            assetid=asset_id,
+   454→                            exptime=expiry_seconds,
+   455→                            isdemo=is_demo,
+   456→                            strike_time=int(time.time())
+   457→                        )
+   458→                        logger.info(f"✅ Trade: {direction.upper()} ${config['amount']} on {pair}")
+   459→                    else:
+   460→                        result = "simulated"
+   461→                        logger.info(f"📝 Sim trade: {direction.upper()} ${config['amount']} on {pair}")
+   462→
+   463→                    trade_record = {
+   464→                        "id": f"auto_{int(time.time())}_{direction}",
+   465→                        "pair": pair,
+   466→                        "direction": "buy" if direction == "call" else "sell",
+   467→                        "callPut": direction,
+   468→                        "amount": config["amount"],
+   469→                        "assetId": asset_id,
+   470→                        "expiryMinutes": config["expiryMinutes"],
+   471→                        "entryPrice": current_price,
+   472→                        "strategy": config["strategy"],
+   473→                        "timestamp": int(time.time() * 1000),
+   474→                        "isDemo": state.is_demo,
+   475→                        "result": str(result)[:300] if result else None,
+   476→                    }
+   477→
+   478→                    with state._lock:
+   479→                        state.open_trades.append(trade_record)
+   480→
+   481→                    state.active_strategy.last_signal = signal
+   482→
+   483→                except Exception as e:
+   484→                    logger.error(f"❌ Auto-trade error: {e}")
+   485→
+   486→        wait_time = min(config["expiryMinutes"] * 60 + 3, 30)
+   487→        time.sleep(wait_time)
+   488→
+   489→
+   490→# ============ Trade Expiry Checker ============
+   491→def trade_expiry_loop():
+   492→    logger.info("Trade expiry checker started")
+   493→
+   494→    while True:
+   495→        if not state.open_trades:
+   496→            time.sleep(5)
+   497→            continue
+   498→
+   499→        now = time.time() * 1000
+   500→        expired_trades = []
+   501→
+   502→        with state._lock:
+   503→            for trade in state.open_trades[:]:
+   504→                expiry_ms = trade.get("expiryMinutes", 1) * 60 * 1000
+   505→                trade_age = now - trade.get("timestamp", now)
+   506→                if trade_age >= expiry_ms:
+   507→                    expired_trades.append(trade)
+   508→                    state.open_trades.remove(trade)
+   509→
+   510→        for trade in expired_trades:
+   511→            entry_price = trade.get("entryPrice", 0)
+   512→            pair = trade.get("pair", "")
+   513→            current_price = state.price_cache.get(pair, entry_price)
+   514→            direction = trade.get("callPut", trade.get("direction", "call"))
+   515→            amount = trade.get("amount", 0)
+   516→            payout_pct = 80
+   517→
+   518→            if direction == "call":
+   519→                won = current_price > entry_price
+   520→            else:
+   521→                won = current_price < entry_price
+   522→
+   523→            pnl = amount * (payout_pct / 100) if won else -amount
+   524→
+   525→            closed_trade = {
+   526→                **trade,
+   527→                "exitPrice": current_price,
+   528→                "pnl": pnl,
+   529→                "won": won,
+   530→                "payoutPercent": payout_pct,
+   531→                "closeTimestamp": int(now),
+   532→            }
+   533→
+   534→            with state._lock:
+   535→                state.trade_history.append(closed_trade)
+   536→                state.daily_pnl += pnl
+   537→
+   538→            emoji = "🟢" if won else "🔴"
+   539→            logger.info(f"{emoji} Trade: {direction.upper()} ${amount} on {pair} - {'WON' if won else 'LOST'} ${abs(pnl):.2f}")
+   540→
+   541→        time.sleep(5)
+   542→
+   543→
+   544→# ============ Auto-Login with Playwright ============
+   545→def auto_login_expertoption(email: str, password: str) -> Optional[str]:
+   546→    """
+   547→    Automatically login to Expert Option using Playwright headless browser.
+   548→    Returns the SSID token if successful, None if failed.
+   549→    """
+   550→    try:
+   551→        from playwright.sync_api import sync_playwright
+   552→        PLAYWRIGHT_AVAILABLE = True
+   553→    except ImportError:
+   554→        PLAYWRIGHT_AVAILABLE = False
+   555→        logger.error("Playwright not available for auto-login")
+   556→        return None
+   557→
+   558→    ssid_token = None
+   559→    logger.info(f"🌐 Auto-login: Opening Expert Option for {email[:5]}...")
+   560→
+   561→    try:
+   562→        with sync_playwright() as p:
+   563→            browser = p.chromium.launch(
+   564→                headless=True,
+   565→                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+   566→            )
+   567→            context = browser.new_context(
+   568→                viewport={'width': 1280, 'height': 720},
+   569→                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+   570→            )
+   571→            page = context.new_page()
+   572→
+   573→            # Go to Expert Option login page
+   574→            logger.info("🌐 Navigating to Expert Option login page...")
+   575→            page.goto('https://expertoption.com/login', wait_until='domcontentloaded', timeout=30000)
+   576→            page.wait_for_timeout(2000)
+   577→
+   578→            # Try to find and fill the email field
+   579→            # Expert Option uses various selectors - try multiple
+   580→            email_filled = False
+   581→            password_filled = False
+   582→
+   583→            # Attempt 1: Common input selectors
+   584→            email_selectors = [
+   585→                'input[type="email"]',
+   586→                'input[name="email"]',
+   587→                'input[id="email"]',
+   588→                'input[placeholder*="email" i]',
+   589→                'input[placeholder*="Email" i]',
+   590→                'input.form-input:first-of-type',
+   591→                'input[type="text"]:first-of-type',
+   592→            ]
+   593→
+   594→            for selector in email_selectors:
+   595→                try:
+   596→                    el = page.query_selector(selector)
+   597→                    if el and el.is_visible():
+   598→                        el.click()
+   599→                        el.fill(email)
+   600→                        email_filled = True
+   601→                        logger.info(f"✅ Email filled with selector: {selector}")
+   602→                        break
+   603→                except:
+   604→                    continue
+   605→
+   606→            if not email_filled:
+   607→                # Try to find any visible input and use the first one for email
+   608→                try:
+   609→                    inputs = page.query_selector_all('input:not([type="hidden"]):not([type="checkbox"])')
+   610→                    visible_inputs = [i for i in inputs if i.is_visible()]
+   611→                    if len(visible_inputs) >= 1:
+   612→                        visible_inputs[0].click()
+   613→                        visible_inputs[0].fill(email)
+   614→                        email_filled = True
+   615→                        logger.info("✅ Email filled (fallback method)")
+   616→                except Exception as e:
+   617→                    logger.error(f"Could not find email input: {e}")
+   618→
+   619→            page.wait_for_timeout(500)
+   620→
+   621→            # Fill password
+   622→            password_selectors = [
+   623→                'input[type="password"]',
+   624→                'input[name="password"]',
+   625→                'input[id="password"]',
+   626→                'input[placeholder*="password" i]',
+   627→                'input[placeholder*="Password" i]',
+   628→            ]
+   629→
+   630→            for selector in password_selectors:
+   631→                try:
+   632→                    el = page.query_selector(selector)
+   633→                    if el and el.is_visible():
+   634→                        el.click()
+   635→                        el.fill(password)
+   636→                        password_filled = True
+   637→                        logger.info(f"✅ Password filled with selector: {selector}")
+   638→                        break
+   639→                except:
+   640→                    continue
+   641→
+   642→            if not password_filled:
+   643→                try:
+   644→                    inputs = page.query_selector_all('input[type="password"]')
+   645→                    visible_pwd = [i for i in inputs if i.is_visible()]
+   646→                    if visible_pwd:
+   647→                        visible_pwd[0].click()
+   648→                        visible_pwd[0].fill(password)
+   649→                        password_filled = True
+   650→                        logger.info("✅ Password filled (fallback)")
+   651→                except Exception as e:
+   652→                    logger.error(f"Could not find password input: {e}")
+   653→
+   654→            if not email_filled or not password_filled:
+   655→                logger.error(f"❌ Could not fill form. Email: {email_filled}, Password: {password_filled}")
+   656→                # Take screenshot for debugging
+   657→                try:
+   658→                    page.screenshot(path='/tmp/eo-login-debug.png')
+   659→                    logger.info("📸 Debug screenshot saved to /tmp/eo-login-debug.png")
+   660→                except:
+   661→                    pass
+   662→                browser.close()
+   663→                return None
+   664→
+   665→            # Click login button
+   666→            page.wait_for_timeout(500)
+   667→
+   668→            login_selectors = [
+   669→                'button[type="submit"]',
+   670→                'button:has-text("Log In")',
+   671→                'button:has-text("Login")',
+   672→                'button:has-text("Sign In")',
+   673→                'button:has-text("تسجيل")',
+   674→                'input[type="submit"]',
+   675→                '.login-btn',
+   676→                'button.btn-primary',
+   677→            ]
+   678→
+   679→            login_clicked = False
+   680→            for selector in login_selectors:
+   681→                try:
+   682→                    el = page.query_selector(selector)
+   683→                    if el and el.is_visible():
+   684→                        el.click()
+   685→                        login_clicked = True
+   686→                        logger.info(f"✅ Login button clicked: {selector}")
+   687→                        break
+   688→                except:
+   689→                    continue
+   690→
+   691→            if not login_clicked:
+   692→                # Try pressing Enter
+   693→                try:
+   694→                    page.keyboard.press('Enter')
+   695→                    login_clicked = True
+   696→                    logger.info("✅ Login submitted with Enter key")
+   697→                except:
+   698→                    pass
+   699→
+   700→            if not login_clicked:
+   701→                logger.error("❌ Could not find login button")
+   702→                browser.close()
+   703→                return None
+   704→
+   705→            # Wait for login to complete (page navigation or cookie set)
+   706→            logger.info("⏳ Waiting for login to complete...")
+   707→            try:
+   708→                # Wait for either URL change or cookie appearance
+   709→                for _ in range(30):  # 30 seconds max
+   710→                    page.wait_for_timeout(1000)
+   711→
+   712→                    # Check cookies for SSID
+   713→                    cookies = context.cookies()
+   714→                    for cookie in cookies:
+   715→                        if cookie.get('name') == 'ssid' and cookie.get('value'):
+   716→                            ssid_token = cookie['value']
+   717→                            logger.info(f"✅ SSID token found! Length: {len(ssid_token)}")
+   718→                            break
+   719→
+   720→                    if ssid_token:
+   721→                        break
+   722→
+   723→                    # Also check if we got redirected to the main app
+   724→                    current_url = page.url
+   725→                    if 'app.expertoption.com' in current_url or ('expertoption.com' in current_url and '/login' not in current_url):
+   726→                        logger.info(f"✅ Redirected to: {current_url}")
+   727→                        # Check cookies again after redirect
+   728→                        cookies = context.cookies()
+   729→                        for cookie in cookies:
+   730→                            if cookie.get('name') == 'ssid' and cookie.get('value'):
+   731→                                ssid_token = cookie['value']
+   732→                                logger.info(f"✅ SSID token found after redirect! Length: {len(ssid_token)}")
+   733→                                break
+   734→                        if ssid_token:
+   735→                            break
+   736→
+   737→            except Exception as e:
+   738→                logger.error(f"Login wait error: {e}")
+   739→
+   740→            browser.close()
+   741→
+   742→    except Exception as e:
+   743→        logger.error(f"❌ Auto-login error: {e}")
+   744→        return None
+   745→
+   746→    if ssid_token:
+   747→        logger.info(f"🎉 Auto-login successful! Token: {ssid_token[:10]}...")
+   748→    else:
+   749→        logger.warning("⚠️ Auto-login: Could not obtain SSID token")
+   750→
+   751→    return ssid_token
+   752→
+   753→
+   754→# ============ API Endpoints ============
+   755→@app.get("/api/status")
+   756→def get_status():
+   757→    return {
+   758→        "connected": state.connected,
+   759→        "is_demo": state.is_demo,
+   760→        "balance": state.balance,
+   761→        "autoTrading": state.auto_trading,
+   762→        "dailyPnl": state.daily_pnl,
+   763→        "openTrades": len(state.open_trades),
+   764→        "eoAvailable": EO_AVAILABLE,
+   765→        "strategy": state.auto_config.get("strategy", "none"),
+   766→        "activeStrategy": state.active_strategy.name if state.active_strategy else None,
+   767→        "pricesCached": len(state.price_cache),
+   768→        "wsClients": len(state.ws_clients),
+   769→        "playwrightAvailable": True,  # Playwright is installed
+   770→    }
+   771→
+   772→
+   773→@app.post("/api/login-email")
+   774→def login_with_email(req: EmailLoginRequest):
+   775→    """
+   776→    Login to Expert Option using email & password.
+   777→    Uses Playwright headless browser to automate the login process
+   778→    and extract the SSID token from cookies.
+   779→    """
+   780→    import concurrent.futures
+   781→    
+   782→    if not req.email or not req.password:
+   783→        raise HTTPException(status_code=400, detail="Email and password are required")
+   784→
+   785→    logger.info(f"📧 Auto-login request for: {req.email[:5]}***@{req.email.split('@')[-1] if '@' in req.email else '...'}")
+   786→
+   787→    # Run Playwright in a thread pool (it's synchronous)
+   788→    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+   789→        future = executor.submit(auto_login_expertoption, req.email, req.password)
+   790→        try:
+   791→            ssid_token = future.result(timeout=60)  # 60 second timeout
+   792→        except concurrent.futures.TimeoutError:
+   793→            raise HTTPException(status_code=408, detail="Login timed out - took more than 60 seconds")
+   794→        except Exception as e:
+   795→            raise HTTPException(status_code=500, detail=f"Auto-login error: {str(e)}")
+   796→
+   797→    if not ssid_token:
+   798→        raise HTTPException(
+   799→            status_code=401, 
+   800→            detail="Auto-login failed - could not obtain SSID token. Check your email/password or try the manual token method."
+   801→        )
+   802→
+   803→    # Now connect with the obtained token
+   804→    if not EO_AVAILABLE:
+   805→        raise HTTPException(status_code=500, detail="ExpertOptionAPI not installed")
+   806→
+   807→    try:
+   808→        # Disconnect existing connection
+   809→        if state.api and state.connected:
+   810→            try:
+   811→                state.api.websocket_client.wss.close()
+   812→            except:
+   813→                pass
+   814→
+   815→        logger.info(f"🔐 Connecting with auto-obtained token: {ssid_token[:10]}...")
+   816→
+   817→        api = EoApi(token=ssid_token, server_region="wss://fr24g1eu.expertoption.com/")
+   818→        result = api.connect()
+   819→
+   820→        if result is False:
+   821→            raise HTTPException(status_code=401, detail="Connection failed with auto-obtained token")
+   822→
+   823→        state.api = api
+   824→        state.token = ssid_token
+   825→        state.connected = True
+   826→        state.is_demo = req.is_demo
+   827→
+   828→        if req.is_demo:
+   829→            try:
+   830→                api.SetDemo()
+   831→                logger.info("🎮 Demo mode activated")
+   832→            except:
+   833→                pass
+   834→
+   835→        # Get profile
+   836→        time.sleep(3)
+   837→        try:
+   838→            profile = api.Profile()
+   839→            state.profile_data = profile
+   840→            if isinstance(profile, dict):
+   841→                state.balance = float(profile.get("balance", 0))
+   842→            elif isinstance(profile, (int, float)):
+   843→                state.balance = float(profile)
+   844→            else:
+   845→                try:
+   846→                    if hasattr(global_value, 'balance'):
+   847→                        state.balance = float(global_value.balance)
+   848→                except:
+   849→                    state.balance = 10000 if req.is_demo else 0
+   850→        except Exception as e:
+   851→            logger.warning(f"Profile fetch error: {e}")
+   852→            state.balance = 10000 if req.is_demo else 0
+   853→
+   854→        logger.info(f"✅ Auto-login successful! Balance: ${state.balance:.2f}")
+   855→
+   856→        return {
+   857→            "success": True,
+   858→            "balance": state.balance,
+   859→            "is_demo": req.is_demo,
+   860→            "autoLogin": True,
+   861→            "tokenLength": len(ssid_token),
+   862→        }
+   863→
+   864→    except HTTPException:
+   865→        raise
+   866→    except Exception as e:
+   867→        logger.error(f"❌ Auto-login connection error: {e}")
+   868→        state.connected = False
+   869→        raise HTTPException(status_code=500, detail=str(e))
+   870→
+   871→
+   872→@app.post("/api/login")
+   873→def login(req: LoginRequest):
+   874→    if not EO_AVAILABLE:
+   875→        raise HTTPException(status_code=500, detail="ExpertOptionAPI not installed. Install with: pip install ExpertOptionAPI")
+   876→
+   877→    try:
+   878→        if state.api and state.connected:
+   879→            try:
+   880→                state.api.websocket_client.wss.close()
+   881→            except:
+   882→                pass
+   883→
+   884→        logger.info(f"🔐 Connecting to Expert Option with token: {req.token[:15]}...")
+   885→
+   886→        api = EoApi(token=req.token, server_region="wss://fr24g1eu.expertoption.com/")
+   887→        result = api.connect()
+   888→
+   889→        if result is False:
+   890→            raise HTTPException(status_code=401, detail="Connection failed - invalid or expired token")
+   891→
+   892→        state.api = api
+   893→        state.token = req.token
+   894→        state.connected = True
+   895→        state.is_demo = req.is_demo
+   896→
+   897→        if req.is_demo:
+   898→            try:
+   899→                api.SetDemo()
+   900→                logger.info("🎮 Demo mode activated")
+   901→            except Exception as e:
+   902→                logger.warning(f"SetDemo error: {e}")
+   903→
+   904→        time.sleep(3)
+   905→        try:
+   906→            profile = api.Profile()
+   907→            state.profile_data = profile
+   908→            if isinstance(profile, dict):
+   909→                state.balance = float(profile.get("balance", 0))
+   910→            elif isinstance(profile, (int, float)):
+   911→                state.balance = float(profile)
+   912→            else:
+   913→                try:
+   914→                    if hasattr(global_value, 'balance'):
+   915→                        state.balance = float(global_value.balance)
+   916→                except:
+   917→                    state.balance = 10000 if req.is_demo else 0
+   918→        except Exception as e:
+   919→            logger.warning(f"Profile fetch error: {e}")
+   920→            state.balance = 10000 if req.is_demo else 0
+   921→
+   922→        logger.info(f"✅ Connected! Balance: ${state.balance:.2f}, Demo: {req.is_demo}")
+   923→
+   924→        return {
+   925→            "success": True,
+   926→            "balance": state.balance,
+   927→            "is_demo": req.is_demo,
+   928→            "profile": str(state.profile_data)[:500] if state.profile_data else None,
+   929→        }
+   930→
+   931→    except HTTPException:
+   932→        raise
+   933→    except Exception as e:
+   934→        logger.error(f"❌ Login error: {e}")
+   935→        state.connected = False
+   936→        raise HTTPException(status_code=500, detail=str(e))
+   937→
+   938→
+   939→@app.post("/api/logout")
+   940→def logout():
+   941→    if state.api and state.connected:
+   942→        try:
+   943→            state.api.websocket_client.wss.close()
+   944→        except:
+   945→            pass
+   946→
+   947→    state.api = None
+   948→    state.connected = False
+   949→    state.token = None
+   950→    state.balance = 0
+   951→    state.auto_trading = False
+   952→    state.profile_data = None
+   953→    state.price_cache.clear()
+   954→    state.open_trades.clear()
+   955→
+   956→    logger.info("👋 Disconnected from Expert Option")
+   957→    return {"success": True}
+   958→
+   959→
+   960→@app.get("/api/profile")
+   961→def get_profile():
+   962→    if not state.connected or not state.api:
+   963→        raise HTTPException(status_code=400, detail="Not connected")
+   964→
+   965→    try:
+   966→        profile = state.api.Profile()
+   967→        state.profile_data = profile
+   968→        if isinstance(profile, dict):
+   969→            state.balance = float(profile.get("balance", state.balance))
+   970→        elif isinstance(profile, (int, float)):
+   971→            state.balance = float(profile)
+   972→
+   973→        return {
+   974→            "balance": state.balance,
+   975→            "is_demo": state.is_demo,
+   976→            "profile": str(profile)[:500] if profile else None,
+   977→        }
+   978→    except Exception as e:
+   979→        raise HTTPException(status_code=500, detail=str(e))
+   980→
+   981→
+   982→@app.post("/api/trade")
+   983→def place_trade(req: TradeRequest):
+   984→    if not state.connected:
+   985→        raise HTTPException(status_code=400, detail="Not connected to Expert Option")
+   986→
+   987→    if req.amount < 1 or req.amount > 100:
+   988→        raise HTTPException(status_code=400, detail="Amount must be between $1 and $100")
+   989→
+   990→    asset_id = ASSET_MAP.get(req.pair, 240)
+   991→    direction = "call" if req.direction in ("buy", "call") else "put"
+   992→    is_demo = 1 if state.is_demo else 0
+   993→    expiry_seconds = req.expiryMinutes * 60
+   994→    current_price = state.price_cache.get(req.pair, 0)
+   995→
+   996→    try:
+   997→        if EO_AVAILABLE and state.api:
+   998→            result = state.api.Buy(
+   999→                amount=req.amount,
+  1000→                type=direction,
+  1001→                assetid=asset_id,
+  1002→                exptime=expiry_seconds,
+  1003→                isdemo=is_demo,
+  1004→                strike_time=int(time.time())
+  1005→            )
+  1006→        else:
+  1007→            result = "simulated"
+  1008→
+  1009→        trade_record = {
+  1010→            "id": f"manual_{int(time.time())}_{direction}",
+  1011→            "pair": req.pair,
+  1012→            "direction": "buy" if direction == "call" else "sell",
+  1013→            "callPut": direction,
+  1014→            "amount": req.amount,
+  1015→            "assetId": asset_id,
+  1016→            "expiryMinutes": req.expiryMinutes,
+  1017→            "entryPrice": current_price,
+  1018→            "timestamp": int(time.time() * 1000),
+  1019→            "isDemo": state.is_demo,
+  1020→            "manual": True,
+  1021→            "result": str(result)[:300] if result else None,
+  1022→        }
+  1023→
+  1024→        with state._lock:
+  1025→            state.open_trades.append(trade_record)
+  1026→
+  1027→        logger.info(f"✅ Manual trade: {direction.upper()} ${req.amount} on {req.pair}")
+  1028→
+  1029→        return {"success": True, "trade": trade_record}
+  1030→
+  1031→    except Exception as e:
+  1032→        logger.error(f"❌ Trade error: {e}")
+  1033→        raise HTTPException(status_code=500, detail=str(e))
+  1034→
+  1035→
+  1036→@app.get("/api/trades")
+  1037→def get_trades():
+  1038→    return {
+  1039→        "openTrades": state.open_trades,
+  1040→        "history": state.trade_history[-50:],
+  1041→        "dailyPnl": state.daily_pnl,
+  1042→    }
+  1043→
+  1044→
+  1045→@app.post("/api/auto-config")
+  1046→def update_auto_config(req: AutoConfigRequest):
+  1047→    with state._lock:
+  1048→        if req.enabled is not None:
+  1049→            state.auto_trading = req.enabled
+  1050→            logger.info(f"🤖 Auto-trading {'ENABLED' if req.enabled else 'DISABLED'}")
+  1051→        if req.amount is not None:
+  1052→            state.auto_config["amount"] = max(1, min(100, req.amount))
+  1053→        if req.expiryMinutes is not None:
+  1054→            state.auto_config["expiryMinutes"] = req.expiryMinutes
+  1055→        if req.strategy is not None:
+  1056→            state.auto_config["strategy"] = req.strategy
+  1057→            state.init_strategy(req.strategy)
+  1058→        if req.maxConcurrentTrades is not None:
+  1059→            state.auto_config["maxConcurrentTrades"] = req.maxConcurrentTrades
+  1060→        if req.maxDailyLoss is not None:
+  1061→            state.auto_config["maxDailyLoss"] = req.maxDailyLoss
+  1062→        if req.maxDailyProfit is not None:
+  1063→            state.auto_config["maxDailyProfit"] = req.maxDailyProfit
+  1064→        if req.pair is not None:
+  1065→            state.auto_config["pair"] = req.pair
+  1066→            state.auto_config["assetId"] = ASSET_MAP.get(req.pair, 240)
+  1067→
+  1068→    return {
+  1069→        "autoTrading": state.auto_trading,
+  1070→        "config": state.auto_config,
+  1071→    }
+  1072→
+  1073→
+  1074→@app.get("/api/auto-status")
+  1075→def get_auto_status():
+  1076→    return {
+  1077→        "enabled": state.auto_trading,
+  1078→        "config": state.auto_config,
+  1079→        "dailyPnl": state.daily_pnl,
+  1080→        "openTrades": len(state.open_trades),
+  1081→        "strategy": state.active_strategy.name if state.active_strategy else None,
+  1082→    }
+  1083→
+  1084→
+  1085→@app.get("/api/strategies")
+  1086→def get_strategies():
+  1087→    return {
+  1088→        "strategies": [
+  1089→            {"id": "ma_cross", "name": "MA Crossover", "description": "تقاطع المتوسطات المتحركة"},
+  1090→            {"id": "rsi", "name": "RSI", "description": "مؤشر القوة النسبية"},
+  1091→            {"id": "macd", "name": "MACD", "description": "تقاطع MACD مع خط الإشارة"},
+  1092→            {"id": "scalping", "name": "Scalping", "description": "سكالبينج سريع"},
+  1093→            {"id": "trend_follow", "name": "Trend Following", "description": "متابعة الاتجاه"},
+  1094→        ],
+  1095→        "active": state.auto_config.get("strategy", "scalping"),
+  1096→    }
+  1097→
+  1098→
+  1099→@app.get("/api/prices")
+  1100→def get_current_prices():
+  1101→    return {
+  1102→        "prices": state.price_cache,
+  1103→        "timestamp": int(time.time() * 1000),
+  1104→    }
+  1105→
+  1106→
+  1107→# ============ Start Background Threads ============
+  1108→price_thread = threading.Thread(target=price_polling_loop, daemon=True)
+  1109→price_thread.start()
+  1110→
+  1111→auto_thread = threading.Thread(target=auto_trading_loop, daemon=True)
+  1112→auto_thread.start()
+  1113→
+  1114→expiry_thread = threading.Thread(target=trade_expiry_loop, daemon=True)
+  1115→expiry_thread.start()
+  1116→
+  1117→# ============ Main ============
+  1118→if __name__ == "__main__":
+  1119→    port = int(os.environ.get("PORT", 3004))
+  1120→    logger.info(f"🚀 Starting Expert Option Bridge v2.0 on port {port}")
+  1121→    logger.info(f"📡 HTTP API: http://localhost:{port}/api/")
+  1122→    logger.info(f"🔌 WebSocket: ws://localhost:{port}/ws")
+  1123→    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+  1124→

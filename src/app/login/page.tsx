@@ -9,7 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Key, Info } from 'lucide-react'
 
-const EO_API = 'http://localhost:3004'
+// Dynamic API URL - works both locally and online (Caddy proxies /api/* → port 3004)
+const getApiUrl = () => {
+  if (typeof window === 'undefined') return 'http://localhost:3004'
+  return window.location.origin
+}
+const EO_API = getApiUrl()
 
 export default function LoginPage() {
   const router = useRouter()

@@ -136,7 +136,13 @@ interface TradingStore {
   setChartType: (type: 'candle' | 'line') => void
 }
 
-const EO_API = 'http://localhost:3004'
+// Dynamic API URL - works both locally and online (Caddy proxies /api/* → port 3004)
+const getApiUrl = () => {
+  if (typeof window === 'undefined') return 'http://localhost:3004'
+  // In production, Caddy routes /api/* and /ws to the correct services
+  return window.location.origin
+}
+const EO_API = getApiUrl()
 
 export const useTradingStore = create<TradingStore>((set, get) => ({
   // Connection

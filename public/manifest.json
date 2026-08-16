@@ -1,0 +1,23 @@
+{
+  "name": "Alfa Expert",
+  "short_name": "AlfaExpert",
+  "description": "تداول آلي ذكي على Expert Option - Options Trading Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#272E4A",
+  "theme_color": "#2F96F0",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": ["finance", "trading"],
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
