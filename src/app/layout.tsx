@@ -14,10 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Alfa Expert - تداول آلي ذكي",
-  description: "منصة Alfa Expert للتداول الآلي المتقدم لأزواج العملات مع روبوت تداول ذكي واستراتيجيات متعددة",
-  keywords: ["تداول", "options", "تداول آلي", "روبوت تداول", "أزواج عملات", "Alfa Expert"],
-  authors: [{ name: "Alfa Expert" }],
+  title: "Alfa Option - تداول آلي ذكي",
+  description: "منصة Alfa Option للتداول الآلي المتقدم مع روبوت تداول ذكي ونظام حماية Alfa Coins",
+  keywords: ["تداول", "options", "تداول آلي", "روبوت تداول", "Alfa Option", "Alfa Coins", "حماية"],
+  authors: [{ name: "Alfa Option" }],
   icons: {
     icon: "/logo.svg",
   },
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     "mobile-web-app-capable": "yes",
     "apple-mobile-web-app-capable": "yes",
     "apple-mobile-web-app-status-bar-style": "black-translucent",
-    "apple-mobile-web-app-title": "Alfa Expert",
+    "apple-mobile-web-app-title": "Alfa Option",
   },
 };
 

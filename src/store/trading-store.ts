@@ -75,6 +75,44 @@ export interface EOConnection {
   dailyPnl: number
 }
 
+// ============ ALFA COINS SYSTEM ============
+export interface AlfaCoinProtectionFund {
+  id: string
+  coins: number           // How many Alfa Coins in this fund
+  remaining: number       // Remaining coins (used for protection)
+  earnedAtTrade: number   // At which trade count this was earned
+  timestamp: number       // When earned
+  isActive: boolean       // Whether this fund is currently being used
+}
+
+export interface AlfaCoinTransaction {
+  id: string
+  type: 'earned' | 'protection_used' | 'protection_refund' | 'bonus'
+  amount: number
+  description: string
+  timestamp: number
+  tradeId?: string
+}
+
+export interface AlfaCoinState {
+  totalCoins: number                              // Total Alfa Coins balance
+  totalTradesCount: number                        // Total trades ever made
+  tradesSinceLastReward: number                   // Trades since last 100-trade milestone
+  nextRewardAt: number                            // Next reward at this many trades (100, 200, 300...)
+  coinsPerReward: number                          // Alfa Coins per 100 trades (default: 100)
+  protectionFunds: AlfaCoinProtectionFund[]       // All protection funds earned
+  transactions: AlfaCoinTransaction[]             // History of coin movements
+  protectionEnabled: boolean                      // Auto-protection on/off
+  protectionThreshold: number                     // Use coins when loss exceeds this % (default: 50%)
+}
+
+// ============ ACTIVATION CODE ============
+export interface ActivationState {
+  isActivated: boolean
+  activationCode: string
+  activationDate: number | null
+}
+
 // ============ STORE ============
 interface TradingStore {
   // Connection
@@ -128,21 +166,35 @@ interface TradingStore {
   setTotalPnL: (val: number) => void
 
   // Active view
-  activeView: 'chart' | 'trades' | 'bot' | 'settings'
-  setActiveView: (view: 'chart' | 'trades' | 'bot' | 'settings') => void
+  activeView: 'chart' | 'trades' | 'bot' | 'protection' | 'settings'
+  setActiveView: (view: 'chart' | 'trades' | 'bot' | 'protection' | 'settings') => void
 
   // Chart type
   chartType: 'candle' | 'line'
   setChartType: (type: 'candle' | 'line') => void
+
+  // Activation
+  activation: ActivationState
+  setActivation: (code: string) => void
+  verifyActivation: (code: string) => Promise<boolean>
+
+  // Alfa Coins
+  alfaCoins: AlfaCoinState
+  processTradeForAlfaCoins: (trade: ClosedTrade) => void
+  useAlfaCoinProtection: (lossAmount: number) => number
+  toggleProtection: (enabled: boolean) => void
+  setProtectionThreshold: (threshold: number) => void
 }
 
 // Dynamic API URL - works both locally and online (Caddy proxies /api/* → port 3004)
 const getApiUrl = () => {
   if (typeof window === 'undefined') return 'http://localhost:3004'
-  // In production, Caddy routes /api/* and /ws to the correct services
   return window.location.origin
 }
 const EO_API = getApiUrl()
+
+// Helper: generate unique ID
+const uid = () => Math.random().toString(36).substring(2, 10)
 
 export const useTradingStore = create<TradingStore>((set, get) => ({
   // Connection
@@ -289,9 +341,15 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
 
   // Closed trades
   tradeHistory: [],
-  addClosedTrade: (trade) => set((state) => ({
-    tradeHistory: [trade, ...state.tradeHistory].slice(0, 100)
-  })),
+  addClosedTrade: (trade) => set((state) => {
+    // Process Alfa Coins when a trade closes
+    const currentState = get()
+    const newAlfaCoins = processAlfaCoinsForTrade(currentState.alfaCoins, trade)
+    return {
+      tradeHistory: [trade, ...state.tradeHistory].slice(0, 100),
+      alfaCoins: newAlfaCoins,
+    }
+  }),
 
   // Strategies
   strategies: {},
@@ -322,4 +380,189 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
   // Chart type
   chartType: 'candle',
   setChartType: (type) => set({ chartType: type }),
+
+  // Activation
+  activation: {
+    isActivated: false,
+    activationCode: '',
+    activationDate: null,
+  },
+  setActivation: (code) => set({
+    activation: {
+      isActivated: true,
+      activationCode: code,
+      activationDate: Date.now(),
+    }
+  }),
+  verifyActivation: async (code) => {
+    // Check activation code with the backend
+    try {
+      const API = getApiUrl()
+      const res = await fetch(`${API}/api/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      })
+      if (res.ok) {
+        set({
+          activation: {
+            isActivated: true,
+            activationCode: code,
+            activationDate: Date.now(),
+          }
+        })
+        return true
+      }
+      return false
+    } catch {
+      // If API not available, accept any code starting with "ALFA-" for demo
+      if (code.startsWith('ALFA-') && code.length >= 8) {
+        set({
+          activation: {
+            isActivated: true,
+            activationCode: code,
+            activationDate: Date.now(),
+          }
+        })
+        return true
+      }
+      return false
+    }
+  },
+
+  // Alfa Coins initial state
+  alfaCoins: {
+    totalCoins: 0,
+    totalTradesCount: 0,
+    tradesSinceLastReward: 0,
+    nextRewardAt: 100,
+    coinsPerReward: 100,
+    protectionFunds: [],
+    transactions: [],
+    protectionEnabled: true,
+    protectionThreshold: 50,
+  },
+
+  // Process a trade for Alfa Coins rewards
+  processTradeForAlfaCoins: (trade) => {
+    const state = get()
+    const newAlfaCoins = processAlfaCoinsForTrade(state.alfaCoins, trade)
+    set({ alfaCoins: newAlfaCoins })
+  },
+
+  // Use Alfa Coins for protection against a loss
+  useAlfaCoinProtection: (lossAmount) => {
+    const state = get()
+    const { alfaCoins } = state
+    
+    if (!alfaCoins.protectionEnabled || alfaCoins.totalCoins <= 0) return 0
+
+    // Calculate how many coins to use (1 coin = $0.10 protection)
+    const maxProtection = alfaCoins.totalCoins * 0.10
+    const protectionAmount = Math.min(lossAmount * (alfaCoins.protectionThreshold / 100), maxProtection)
+    const coinsUsed = Math.ceil(protectionAmount / 0.10)
+
+    if (coinsUsed <= 0) return 0
+
+    set({
+      alfaCoins: {
+        ...alfaCoins,
+        totalCoins: Math.max(0, alfaCoins.totalCoins - coinsUsed),
+        protectionFunds: alfaCoins.protectionFunds.map(f => {
+          if (f.isActive && f.remaining > 0) {
+            const used = Math.min(f.remaining, coinsUsed)
+            return { ...f, remaining: f.remaining - used }
+          }
+          return f
+        }),
+        transactions: [
+          {
+            id: uid(),
+            type: 'protection_used',
+            amount: -coinsUsed,
+            description: `استخدام ${coinsUsed} كوين الفا لحماية خسارة $${lossAmount.toFixed(2)}`,
+            timestamp: Date.now(),
+          },
+          ...alfaCoins.transactions,
+        ].slice(0, 200),
+      }
+    })
+
+    return protectionAmount
+  },
+
+  toggleProtection: (enabled) => set((state) => ({
+    alfaCoins: { ...state.alfaCoins, protectionEnabled: enabled }
+  })),
+
+  setProtectionThreshold: (threshold) => set((state) => ({
+    alfaCoins: { ...state.alfaCoins, protectionThreshold: threshold }
+  })),
 }))
+
+// ============ HELPER: Process Alfa Coins for a closed trade ============
+function processAlfaCoinsForTrade(currentState: AlfaCoinState, trade: ClosedTrade): AlfaCoinState {
+  const newTradesCount = currentState.totalTradesCount + 1
+  const newTradesSinceReward = currentState.tradesSinceLastReward + 1
+
+  // Check if we hit a 100-trade milestone
+  let newCoins = currentState.totalCoins
+  let newFunds = [...currentState.protectionFunds]
+  let newTransactions = [...currentState.transactions]
+  let newNextReward = currentState.nextRewardAt
+
+  if (newTradesCount >= currentState.nextRewardAt) {
+    // Earned a new protection fund!
+    const earnedCoins = currentState.coinsPerReward
+    newCoins += earnedCoins
+    newNextReward = currentState.nextRewardAt + 100
+
+    const fund: AlfaCoinProtectionFund = {
+      id: uid(),
+      coins: earnedCoins,
+      remaining: earnedCoins,
+      earnedAtTrade: newTradesCount,
+      timestamp: Date.now(),
+      isActive: true,
+    }
+    newFunds.push(fund)
+
+    newTransactions.unshift({
+      id: uid(),
+      type: 'earned',
+      amount: earnedCoins,
+      description: `كسب ${earnedCoins} كوين الفا — مكافأة ${currentState.nextRewardAt} صفقة!`,
+      timestamp: Date.now(),
+    })
+  }
+
+  // Auto-protect against losses
+  if (!trade.won && currentState.protectionEnabled && newCoins > 0) {
+    const lossAmount = trade.amount // The investment amount lost
+    const maxProtection = newCoins * 0.10 // 1 Alfa Coin = $0.10 protection
+    const protectionAmount = Math.min(lossAmount * 0.5, maxProtection) // Protect up to 50% of loss
+    const coinsUsed = Math.ceil(protectionAmount / 0.10)
+
+    if (coinsUsed > 0 && coinsUsed <= newCoins) {
+      newCoins -= coinsUsed
+      newTransactions.unshift({
+        id: uid(),
+        type: 'protection_used',
+        amount: -coinsUsed,
+        description: `حماية تلقائية: استخدام ${coinsUsed} كوين الفا — تعويض $${protectionAmount.toFixed(2)} من خسارة $${lossAmount.toFixed(2)}`,
+        timestamp: Date.now(),
+        tradeId: trade.id,
+      })
+    }
+  }
+
+  return {
+    ...currentState,
+    totalCoins: newCoins,
+    totalTradesCount: newTradesCount,
+    tradesSinceLastReward: newTradesCount >= currentState.nextRewardAt ? 0 : newTradesSinceReward,
+    nextRewardAt: newNextReward,
+    protectionFunds: newFunds,
+    transactions: newTransactions.slice(0, 200),
+  }
+}

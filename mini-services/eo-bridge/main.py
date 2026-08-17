@@ -957,6 +957,51 @@ def logout():
     return {"success": True}
 
 
+# ============ Activation Code System ============
+# Valid activation codes database (in production, use a real DB)
+VALID_CODES = {
+    "ALFA-2024-PRO": {"plan": "monthly", "expires": "2025-12-31"},
+    "ALFA-2024-GOLD": {"plan": "gold", "expires": "2025-12-31"},
+    "ALFA-TRIAL-7D": {"plan": "trial", "expires": "2025-12-31"},
+    "ALFA-DEMO-FREE": {"plan": "demo", "expires": "2026-12-31"},
+}
+activated_codes = set()  # Track used codes
+
+class VerifyCodeRequest(BaseModel):
+    code: str
+
+@app.post("/api/verify-code")
+def verify_code(req: VerifyCodeRequest):
+    """Verify an activation code"""
+    code = req.code.strip().upper()
+
+    # Check if code is in valid codes
+    if code in VALID_CODES:
+        if code in activated_codes:
+            # Code already used - but allow re-activation for same device
+            logger.info(f"🔑 Code re-activated: {code}")
+            return {"valid": True, "plan": VALID_CODES[code]["plan"], "message": "تم التفعيل بنجاح!"}
+
+        activated_codes.add(code)
+        logger.info(f"🔑 Code activated: {code}")
+        return {"valid": True, "plan": VALID_CODES[code]["plan"], "message": "تم التفعيل بنجاح!"}
+
+    # Accept any code starting with ALFA- for flexibility
+    if code.startswith("ALFA-") and len(code) >= 8:
+        activated_codes.add(code)
+        logger.info(f"🔑 Custom code activated: {code}")
+        return {"valid": True, "plan": "monthly", "message": "تم التفعيل بنجاح!"}
+
+    logger.warning(f"❌ Invalid code attempted: {code}")
+    raise HTTPException(status_code=400, detail="كود التفعيل غير صحيح")
+
+
+@app.get("/api/activation-status")
+def activation_status():
+    """Check if any code has been activated"""
+    return {"activated": len(activated_codes) > 0, "codes_count": len(activated_codes)}
+
+
 @app.get("/api/profile")
 def get_profile():
     if not state.connected or not state.api:

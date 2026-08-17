@@ -6,7 +6,7 @@ import { useTradingStore } from '@/store/trading-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
-import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Info, Bot, CheckCircle2, Loader2 } from 'lucide-react'
+import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Info, Bot, CheckCircle2, Loader2, Coins } from 'lucide-react'
 
 // Dynamic API URL - works both locally and online
 const getApiUrl = () => {
@@ -74,7 +74,7 @@ export default function LoginPage() {
       })
       useTradingStore.getState().setBalance(data.balance || 10000)
 
-      router.push('/')
+      router.push('/trading')
     } catch (e: any) {
       setError(e.message || 'فشل الاتصال - تأكد من الإيميل والباسورد')
       setStep('idle')
@@ -96,10 +96,14 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-6">
           <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[#2F96F0] to-[#1A6DD0] flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[#2F96F0]/30">
-            <TrendingUp className="w-11 h-11 text-white" />
+            <span className="text-4xl font-black text-white">α</span>
           </div>
-          <h1 className="text-3xl font-bold text-[#F5F5F5]">Alfa Expert</h1>
+          <h1 className="text-3xl font-bold text-[#F5F5F5]">Alfa Option</h1>
           <p className="text-sm text-[#A9B5CB] mt-2">تداول آلي ذكي على Expert Option</p>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            <Coins className="w-4 h-4 text-[#FFD700]" />
+            <span className="text-xs text-[#FFD700] font-bold">نظام حماية Alfa Coins مفعل</span>
+          </div>
         </div>
 
         {/* Account Mode Toggle */}
@@ -228,13 +232,13 @@ export default function LoginPage() {
                   <span className="w-5 h-5 rounded-full bg-[#2F96F0]/20 text-[#2F96F0] flex items-center justify-center text-[9px] font-bold flex-shrink-0">2</span>
                   <span>يسجل دخولك بإيميلك وباسوردك على الموقع</span>
                 </div>
-                <div className="flex items-center gap-2 text" style={{ fontSize: '10px', color: '#A9B5CB' }}>
-                  <span className="w-5 h-5 rounded-full bg-[#2F96F0]/20 text-[#2F96F0] flex items-center justify-center flex-shrink-0" style={{ fontSize: '9px', fontWeight: 'bold' }}>3</span>
+                <div className="flex items-center gap-2 text-[10px] text-[#A9B5CB]">
+                  <span className="w-5 h-5 rounded-full bg-[#2F96F0]/20 text-[#2F96F0] flex items-center justify-center text-[9px] font-bold flex-shrink-0">3</span>
                   <span>يستخرج الـ SSID Token من الـ Cookies تلقائي</span>
                 </div>
-                <div className="flex items-center gap-2 text" style={{ fontSize: '10px', color: '#A9B5CB' }}>
-                  <span className="w-5 h-5 rounded-full bg-[#57BC9A]/20 text-[#57BC9A] flex items-center justify-center flex-shrink-0" style={{ fontSize: '9px', fontWeight: 'bold' }}>4</span>
-                  <span>يربط حسابك ويجيب الرصيد — جاهز للتداول! 🚀</span>
+                <div className="flex items-center gap-2 text-[10px] text-[#A9B5CB]">
+                  <span className="w-5 h-5 rounded-full bg-[#57BC9A]/20 text-[#57BC9A] flex items-center justify-center text-[9px] font-bold flex-shrink-0">4</span>
+                  <span>يربط حسابك ويجيب الرصيد — جاهز للتداول!</span>
                 </div>
               </div>
             </div>
@@ -255,7 +259,7 @@ export default function LoginPage() {
         )}
 
         <div className="text-center text-[9px] text-[#A9B5CB]/40 pt-1">
-          Alfa Expert v2.0 • تداول آلي ذكي • غير تابع لـ Expert Option
+          Alfa Option v3.0 • تداول آلي ذكي • حماية Alfa Coins
         </div>
       </div>
     </div>

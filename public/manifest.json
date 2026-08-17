@@ -1,7 +1,7 @@
 {
-  "name": "Alfa Expert",
-  "short_name": "AlfaExpert",
-  "description": "تداول آلي ذكي على Expert Option - Options Trading Platform",
+  "name": "Alfa Option",
+  "short_name": "AlfaOption",
+  "description": "تداول آلي ذكي مع روبوت AI ونظام حماية Alfa Coins - Options Trading Platform",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -15,6 +15,12 @@
       "src": "/logo.svg",
       "sizes": "any",
       "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/robot-image.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any"
     }
   ],
