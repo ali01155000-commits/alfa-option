@@ -63,3 +63,79 @@ model AutoBotConfig {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }
+
+// ============ Protection Fund System ============
+
+// Subscriber accounts with protection plans
+model Subscriber {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  name            String?
+  plan            String   @default("free") // "free", "bronze", "silver", "gold"
+  planPrice       Float    @default(0.0)    // monthly price
+  protectionPct   Float    @default(0.0)    // % of loss protected
+  protectionLimit Float    @default(0.0)    // max protection per month
+  fundBalance     Float    @default(0.0)    // current protection fund balance
+  fundUsed        Float    @default(0.0)    // how much used this month
+  fundResetAt     DateTime @default(now())  // when fund resets (monthly)
+  totalTrades     Int      @default(0)
+  winningTrades   Int      @default(0)
+  totalVolume     Float    @default(0.0)    // total trading volume
+  milestone       Int      @default(1)      // current milestone level (1-4)
+  isActive        Boolean  @default(true)
+  subscribedAt    DateTime @default(now())
+  expiresAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  rewardBoxes     RewardBox[]
+  transactions    FundTransaction[]
+  claims          ProtectionClaim[]
+}
+
+// Reward boxes that unlock with trading activity
+model RewardBox {
+  id            String   @id @default(cuid())
+  subscriberId  String
+  subscriber    Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  boxType       String   @default("standard") // "standard", "premium", "vip"
+  status        String   @default("locked")   // "locked", "available", "opened", "expired"
+  requiredTrades Int     @default(5)          // trades needed to unlock
+  bonusAmount   Float    @default(0.0)        // bonus $ amount
+  bonusPct      Float    @default(0.0)        // extra protection %
+  freeTrades    Int      @default(0)          // free trades included
+  unlockedAt    DateTime?
+  openedAt      DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Fund transactions (deposits, claims, rewards)
+model FundTransaction {
+  id            String   @id @default(cuid())
+  subscriberId  String
+  subscriber    Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  type          String   // "subscription", "protection_claim", "reward_bonus", "milestone_bonus", "fund_deposit", "fund_reset"
+  amount        Float
+  balance       Float    // balance after transaction
+  description   String?
+  tradeId       String?  // related trade ID (for claims)
+  createdAt     DateTime @default(now())
+}
+
+// Protection claims when trades lose
+model ProtectionClaim {
+  id            String   @id @default(cuid())
+  subscriberId  String
+  subscriber    Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  tradeId       String?
+  tradePair     String
+  tradeAmount   Float    // original trade amount
+  tradeLoss     Float    // actual loss
+  claimPct      Float    // protection % applied
+  claimAmount   Float    // amount reimbursed
+  status        String   @default("approved") // "pending", "approved", "rejected"
+  createdAt     DateTime @default(now())
+}

@@ -1104,6 +1104,438 @@ def get_current_prices():
     }
 
 
+# ============ Protection Fund System ============
+
+# Plan configurations
+PROTECTION_PLANS = {
+    "free":    {"price": 0,   "protectionPct": 0,   "limit": 0,     "welcomeBonus": 0,  "name_en": "Free",    "name_ar": "مجاني"},
+    "bronze":  {"price": 10,  "protectionPct": 10,  "limit": 100,   "welcomeBonus": 5,  "name_en": "Bronze",  "name_ar": "برونزي"},
+    "silver":  {"price": 25,  "protectionPct": 25,  "limit": 500,   "welcomeBonus": 15, "name_en": "Silver",  "name_ar": "فضي"},
+    "gold":    {"price": 50,  "protectionPct": 40,  "limit": 1000,  "welcomeBonus": 30, "name_en": "Gold",    "name_ar": "ذهبي"},
+}
+
+# Milestone configurations
+MILESTONES = [
+    {"level": 1, "volume": 0,     "extraProtection": 0,  "label": "البداية",   "labelEn": "Start"},
+    {"level": 2, "volume": 500,   "extraProtection": 5,  "label": "متقدم",    "labelEn": "Advanced"},
+    {"level": 3, "volume": 2000,  "extraProtection": 10, "label": "محترف",    "labelEn": "Professional"},
+    {"level": 4, "volume": 5000,  "extraProtection": 15, "label": "VIP",       "labelEn": "VIP"},
+]
+
+# In-memory subscriber store (in production, use database)
+_subscribers: Dict[str, dict] = {}
+_reward_boxes: Dict[str, list] = {}
+_fund_transactions: Dict[str, list] = {}
+_protection_claims: Dict[str, list] = {}
+
+
+class SubscribeRequest(BaseModel):
+    email: str
+    name: str = ""
+    plan: str  # "bronze", "silver", "gold"
+
+
+class ClaimRequest(BaseModel):
+    email: str
+    tradeId: str = ""
+    tradePair: str
+    tradeAmount: float
+    tradeLoss: float
+
+
+class OpenBoxRequest(BaseModel):
+    email: str
+    boxId: str
+
+
+@app.get("/api/protection/plans")
+def get_protection_plans():
+    """Get all available protection plans"""
+    return {
+        "plans": [
+            {
+                "id": k,
+                "name": v["name_ar"],
+                "nameEn": v.get("name_en", k),
+                "price": v["price"],
+                "protectionPct": v["protectionPct"],
+                "limit": v["limit"],
+                "welcomeBonus": v["welcomeBonus"],
+            }
+            for k, v in PROTECTION_PLANS.items()
+        ],
+        "milestones": MILESTONES,
+    }
+
+
+@app.post("/api/protection/subscribe")
+def subscribe_to_plan(req: SubscribeRequest):
+    """Subscribe to a protection plan"""
+    if req.plan not in PROTECTION_PLANS:
+        raise HTTPException(status_code=400, detail="Invalid plan. Choose: bronze, silver, gold")
+    
+    plan = PROTECTION_PLANS[req.plan]
+    
+    # Check if already subscribed
+    existing = _subscribers.get(req.email)
+    if existing and existing["plan"] == req.plan and existing["isActive"]:
+        raise HTTPException(status_code=400, detail="Already subscribed to this plan")
+    
+    now = time.time()
+    month_seconds = 30 * 24 * 3600
+    
+    subscriber = {
+        "email": req.email,
+        "name": req.name or req.email.split("@")[0],
+        "plan": req.plan,
+        "planPrice": plan["price"],
+        "protectionPct": plan["protectionPct"],
+        "protectionLimit": plan["limit"],
+        "fundBalance": plan["limit"],  # Fund starts at limit
+        "fundUsed": 0.0,
+        "fundResetAt": now + month_seconds,
+        "totalTrades": existing["totalTrades"] if existing else 0,
+        "winningTrades": existing["winningTrades"] if existing else 0,
+        "totalVolume": existing["totalVolume"] if existing else 0.0,
+        "milestone": existing["milestone"] if existing else 1,
+        "isActive": True,
+        "subscribedAt": now,
+        "expiresAt": now + month_seconds,
+    }
+    _subscribers[req.email] = subscriber
+    
+    # Add welcome bonus transaction
+    if plan["welcomeBonus"] > 0:
+        tx = {
+            "id": f"tx_{int(now*1000)}",
+            "type": "subscription",
+            "amount": plan["welcomeBonus"],
+            "balance": subscriber["fundBalance"] + plan["welcomeBonus"],
+            "description": f"مكافأة ترحيبية - خطة {plan['name_ar']}",
+            "createdAt": now,
+        }
+        _fund_transactions.setdefault(req.email, []).append(tx)
+        subscriber["fundBalance"] += plan["welcomeBonus"]
+    
+    # Generate initial reward boxes
+    boxes = _generate_reward_boxes(req.email, req.plan, subscriber["totalTrades"])
+    _reward_boxes.setdefault(req.email, []).extend(boxes)
+    
+    # Subscription transaction
+    tx = {
+        "id": f"tx_{int(now*1000)+1}",
+        "type": "subscription",
+        "amount": plan["price"],
+        "balance": subscriber["fundBalance"],
+        "description": f"اشتراك خطة {plan['name_ar']} - ${plan['price']}/شهر",
+        "createdAt": now,
+    }
+    _fund_transactions.setdefault(req.email, []).append(tx)
+    
+    logger.info(f"🛡️ {req.email} subscribed to {req.plan} plan")
+    
+    return {
+        "success": True,
+        "subscriber": subscriber,
+        "rewardBoxes": len(boxes),
+        "message": f"تم الاشتراك في خطة {plan['name_ar']} بنجاح!"
+    }
+
+
+@app.get("/api/protection/status")
+def get_protection_status(email: str = ""):
+    """Get protection status for a subscriber"""
+    if not email or email not in _subscribers:
+        return {
+            "subscribed": False,
+            "plan": "free",
+            "planName": "مجاني",
+            "fundBalance": 0,
+            "fundUsed": 0,
+            "protectionPct": 0,
+            "protectionLimit": 0,
+            "milestone": 1,
+            "totalTrades": 0,
+            "winRate": 0,
+        }
+    
+    sub = _subscribers[email]
+    
+    # Check if fund needs reset
+    now = time.time()
+    if now >= sub["fundResetAt"]:
+        sub["fundBalance"] = sub["protectionLimit"]
+        sub["fundUsed"] = 0.0
+        sub["fundResetAt"] = now + 30 * 24 * 3600
+        logger.info(f"🔄 Fund reset for {email}")
+    
+    # Calculate milestone
+    milestone_extra = 0
+    for m in MILESTONES:
+        if sub["totalVolume"] >= m["volume"]:
+            sub["milestone"] = m["level"]
+            milestone_extra = m["extraProtection"]
+    
+    win_rate = (sub["winningTrades"] / sub["totalTrades"] * 100) if sub["totalTrades"] > 0 else 0
+    
+    return {
+        "subscribed": sub["isActive"],
+        "plan": sub["plan"],
+        "planName": PROTECTION_PLANS.get(sub["plan"], {}).get("name_ar", sub["plan"]),
+        "planPrice": sub["planPrice"],
+        "fundBalance": sub["fundBalance"],
+        "fundUsed": sub["fundUsed"],
+        "fundRemaining": sub["fundBalance"] - sub["fundUsed"],
+        "protectionPct": sub["protectionPct"] + milestone_extra,
+        "protectionLimit": sub["protectionLimit"],
+        "milestone": sub["milestone"],
+        "milestoneExtra": milestone_extra,
+        "totalTrades": sub["totalTrades"],
+        "winningTrades": sub["winningTrades"],
+        "winRate": round(win_rate, 1),
+        "totalVolume": sub["totalVolume"],
+        "expiresAt": sub.get("expiresAt", 0),
+    }
+
+
+@app.post("/api/protection/claim")
+def file_protection_claim(req: ClaimRequest):
+    """File a protection claim when a trade loses"""
+    if req.email not in _subscribers:
+        raise HTTPException(status_code=404, detail="Not subscribed to any plan")
+    
+    sub = _subscribers[req.email]
+    if not sub["isActive"]:
+        raise HTTPException(status_code=400, detail="Subscription expired")
+    
+    # Calculate milestone extra protection
+    milestone_extra = 0
+    for m in MILESTONES:
+        if sub["totalVolume"] >= m["volume"]:
+            milestone_extra = m["extraProtection"]
+    
+    total_protection_pct = sub["protectionPct"] + milestone_extra
+    fund_remaining = sub["fundBalance"] - sub["fundUsed"]
+    
+    if total_protection_pct == 0 or fund_remaining <= 0:
+        raise HTTPException(status_code=400, detail="No protection available")
+    
+    # Calculate claim amount
+    claim_amount = min(
+        req.tradeLoss * (total_protection_pct / 100),  # % of loss
+        fund_remaining  # Can't exceed remaining fund
+    )
+    
+    if claim_amount <= 0:
+        raise HTTPException(status_code=400, detail="Claim amount is zero")
+    
+    # Update fund
+    sub["fundUsed"] += claim_amount
+    sub["totalTrades"] += 1
+    
+    # Record claim
+    now = time.time()
+    claim = {
+        "id": f"cl_{int(now*1000)}",
+        "tradeId": req.tradeId,
+        "tradePair": req.tradePair,
+        "tradeAmount": req.tradeAmount,
+        "tradeLoss": req.tradeLoss,
+        "claimPct": total_protection_pct,
+        "claimAmount": round(claim_amount, 2),
+        "status": "approved",
+        "createdAt": now,
+    }
+    _protection_claims.setdefault(req.email, []).append(claim)
+    
+    # Record transaction
+    tx = {
+        "id": f"tx_{int(now*1000)}",
+        "type": "protection_claim",
+        "amount": round(claim_amount, 2),
+        "balance": sub["fundBalance"] - sub["fundUsed"],
+        "description": f"تعويض حماية: {req.tradePair} - {total_protection_pct}% من ${req.tradeLoss:.2f}",
+        "tradeId": req.tradeId,
+        "createdAt": now,
+    }
+    _fund_transactions.setdefault(req.email, []).append(tx)
+    
+    # Check reward boxes
+    newly_unlocked = _check_reward_boxes(req.email, sub["totalTrades"])
+    
+    logger.info(f"🛡️ Protection claim: ${claim_amount:.2f} for {req.email} ({req.tradePair})")
+    
+    return {
+        "success": True,
+        "claim": claim,
+        "fundRemaining": sub["fundBalance"] - sub["fundUsed"],
+        "newlyUnlockedBoxes": newly_unlocked,
+        "message": f"تم تعويض ${claim_amount:.2f} من صندوق الحماية!"
+    }
+
+
+@app.post("/api/protection/trade-update")
+def update_trade_result(email: str = "", won: bool = False, amount: float = 0, pair: str = ""):
+    """Update subscriber trade stats (called when trade closes)"""
+    if email not in _subscribers:
+        return {"updated": False}
+    
+    sub = _subscribers[email]
+    sub["totalTrades"] += 1
+    sub["totalVolume"] += amount
+    
+    if won:
+        sub["winningTrades"] += 1
+    
+    # Update milestone
+    for m in reversed(MILESTONES):
+        if sub["totalVolume"] >= m["volume"]:
+            sub["milestone"] = m["level"]
+            break
+    
+    # Check reward boxes
+    newly_unlocked = _check_reward_boxes(email, sub["totalTrades"])
+    
+    return {
+        "updated": True,
+        "totalTrades": sub["totalTrades"],
+        "milestone": sub["milestone"],
+        "newlyUnlockedBoxes": newly_unlocked,
+    }
+
+
+@app.get("/api/protection/boxes")
+def get_reward_boxes(email: str = ""):
+    """Get all reward boxes for a subscriber"""
+    boxes = _reward_boxes.get(email, [])
+    return {"boxes": boxes, "total": len(boxes)}
+
+
+@app.post("/api/protection/open-box")
+def open_reward_box(req: OpenBoxRequest):
+    """Open a reward box"""
+    boxes = _reward_boxes.get(req.email, [])
+    box = None
+    for b in boxes:
+        if b["id"] == req.boxId:
+            box = b
+            break
+    
+    if not box:
+        raise HTTPException(status_code=404, detail="Box not found")
+    
+    if box["status"] != "available":
+        raise HTTPException(status_code=400, detail=f"Box is {box['status']}, cannot open")
+    
+    now = time.time()
+    box["status"] = "opened"
+    box["openedAt"] = now
+    
+    # Apply rewards
+    sub = _subscribers.get(req.email)
+    if sub:
+        if box["bonusAmount"] > 0:
+            sub["fundBalance"] += box["bonusAmount"]
+        if box["bonusPct"] > 0:
+            sub["protectionPct"] = min(sub["protectionPct"] + box["bonusPct"], 50)  # Cap at 50%
+        
+        # Record transaction
+        tx = {
+            "id": f"tx_{int(now*1000)}",
+            "type": "reward_bonus",
+            "amount": box["bonusAmount"],
+            "balance": sub["fundBalance"],
+            "description": f"مكافأة من صندوق {box['boxType']}: ${box['bonusAmount']:.2f} بونص + {box['bonusPct']:.0f}% حماية إضافية",
+            "createdAt": now,
+        }
+        _fund_transactions.setdefault(req.email, []).append(tx)
+    
+    return {
+        "success": True,
+        "box": box,
+        "message": f"فتحت صندوق {box['boxType']}! حصلت على ${box['bonusAmount']:.2f} بونص و {box['bonusPct']:.0f}% حماية إضافية"
+    }
+
+
+@app.get("/api/protection/transactions")
+def get_fund_transactions(email: str = "", limit: int = 20):
+    """Get fund transaction history"""
+    txs = _fund_transactions.get(email, [])
+    return {"transactions": txs[-limit:], "total": len(txs)}
+
+
+@app.get("/api/protection/claims")
+def get_protection_claims(email: str = "", limit: int = 20):
+    """Get protection claim history"""
+    claims = _protection_claims.get(email, [])
+    return {"claims": claims[-limit:], "total": len(claims)}
+
+
+# ============ Helper Functions ============
+
+def _generate_reward_boxes(email: str, plan: str, current_trades: int) -> list:
+    """Generate reward boxes based on plan"""
+    now = time.time()
+    boxes = []
+    
+    if plan == "free":
+        return boxes
+    
+    # Number of boxes depends on plan
+    num_boxes = {"bronze": 3, "silver": 6, "gold": 9}.get(plan, 0)
+    
+    for i in range(num_boxes):
+        box_type = "standard"
+        bonus = 2.0 + (i * 0.5)
+        bonus_pct = 1.0
+        free_trades = 0
+        required = 5 + (i * 3)  # 5, 8, 11, 14...
+        
+        if i >= num_boxes * 0.6:  # Top 40% are premium
+            box_type = "premium"
+            bonus = 5.0 + (i * 1.0)
+            bonus_pct = 2.0
+            free_trades = 1
+        
+        if plan == "gold" and i == num_boxes - 1:  # Last box in gold is VIP
+            box_type = "vip"
+            bonus = 20.0
+            bonus_pct = 5.0
+            free_trades = 3
+        
+        status = "available" if current_trades >= required else "locked"
+        
+        boxes.append({
+            "id": f"box_{email}_{i+1}",
+            "boxType": box_type,
+            "status": status,
+            "requiredTrades": required,
+            "bonusAmount": bonus,
+            "bonusPct": bonus_pct,
+            "freeTrades": free_trades,
+            "unlockedAt": now if status == "available" else None,
+            "openedAt": None,
+            "createdAt": now,
+        })
+    
+    return boxes
+
+
+def _check_reward_boxes(email: str, total_trades: int) -> int:
+    """Check and unlock reward boxes based on trade count"""
+    boxes = _reward_boxes.get(email, [])
+    newly_unlocked = 0
+    now = time.time()
+    
+    for box in boxes:
+        if box["status"] == "locked" and total_trades >= box["requiredTrades"]:
+            box["status"] = "available"
+            box["unlockedAt"] = now
+            newly_unlocked += 1
+    
+    return newly_unlocked
+
+
 # ============ Start Background Threads ============
 price_thread = threading.Thread(target=price_polling_loop, daemon=True)
 price_thread.start()

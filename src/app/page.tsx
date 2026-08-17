@@ -21,6 +21,7 @@ import {
   CandlestickChart,
   TrendingUp,
   LogOut,
+  Shield,
 } from 'lucide-react'
 
 export default function TradingPlatform() {
@@ -115,7 +116,7 @@ export default function TradingPlatform() {
       {/* Main Content Area */}
       <div className="flex-1 px-2 pb-2 flex flex-col">
         <Tabs defaultValue="chart" className="flex-1 flex flex-col" onValueChange={(v) => setActiveView(v as any)}>
-          <TabsList className="w-full grid grid-cols-4 mb-1.5 bg-[#222940] h-8">
+          <TabsList className="w-full grid grid-cols-5 mb-1.5 bg-[#222940] h-8">
             <TabsTrigger value="chart" className="text-[10px] gap-0.5 data-[state=active]:bg-[#2F96F0] data-[state=active]:text-white">
               <BarChart3 className="w-3 h-3" />
               الشارت
@@ -127,6 +128,10 @@ export default function TradingPlatform() {
             <TabsTrigger value="bot" className="text-[10px] gap-0.5 data-[state=active]:bg-[#2F96F0] data-[state=active]:text-white">
               <Bot className="w-3 h-3" />
               البوت
+            </TabsTrigger>
+            <TabsTrigger value="protection" className="text-[10px] gap-0.5 data-[state=active]:bg-[#2F96F0] data-[state=active]:text-white">
+              <Shield className="w-3 h-3" />
+              الحماية
             </TabsTrigger>
             <TabsTrigger value="settings" className="text-[10px] gap-0.5 data-[state=active]:bg-[#2F96F0] data-[state=active]:text-white">
               <Settings className="w-3 h-3" />
@@ -202,6 +207,17 @@ export default function TradingPlatform() {
           {/* Bot Tab */}
           <TabsContent value="bot" className="flex-1 mt-0 overflow-y-auto">
             <AutoBotPanel emit={emit} />
+          </TabsContent>
+
+          {/* Protection Tab */}
+          <TabsContent value="protection" className="flex-1 mt-0 overflow-y-auto">
+            <div className="space-y-3">
+              <iframe
+                src="/protection"
+                className="w-full h-[600px] border-0 rounded-lg"
+                title="صناديق الحماية"
+              />
+            </div>
           </TabsContent>
 
           {/* Settings Tab */}
