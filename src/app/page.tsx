@@ -18,11 +18,25 @@ import Image from 'next/image'
 type PageState = 'landing' | 'activation' | 'success'
 type BuyStep = 'idle' | 'wallet' | 'screenshot' | 'send'
 
-// ============ WALLET ADDRESS ============
-// USDT TRC20 wallet for subscription payments
-const WALLET_ADDRESS = 'TKsMvr5FzYx5HqZqZJf8vX9KpW2nR7bL4E'
-const WALLET_NETWORK = 'TRC20 (TRON)'
-const WALLET_CURRENCY = 'USDT'
+// ============ WALLET ADDRESSES ============
+const WALLETS = [
+  {
+    address: '0x01338E0788D52C0cA35C36aB7281Cf3e6B4780Bd',
+    network: 'BEP20 (BNB Smart Chain)',
+    networkShort: 'BEP20',
+    currency: 'USDT',
+    color: '#F0B90B',
+    qrImage: '/wallet-bep20-qr.png',
+  },
+  {
+    address: 'TGGsJVHMbWwXmzNNXcrhmeHMd7Z3w8t5dx',
+    network: 'TRC20 (TRON)',
+    networkShort: 'TRC20',
+    currency: 'USDT',
+    color: '#FF0013',
+    qrImage: '/wallet-trc20-qr.png',
+  },
+]
 const SUBSCRIPTION_PRICE = '$150'
 const TELEGRAM_CHANNEL = '@ALFa_proo'
 
@@ -60,6 +74,7 @@ export default function LandingPage() {
   const [buyStep, setBuyStep] = useState<BuyStep>('idle')
   const [paymentId, setPaymentId] = useState('')
   const [walletCopied, setWalletCopied] = useState(false)
+  const [selectedWallet, setSelectedWallet] = useState(0) // 0 = BEP20, 1 = TRC20
 
   const handleEnterBot = () => {
     setPageState('activation')
@@ -95,13 +110,12 @@ export default function LandingPage() {
 
   const copyWalletAddress = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(WALLET_ADDRESS)
+      await navigator.clipboard.writeText(WALLETS[selectedWallet].address)
       setWalletCopied(true)
       setTimeout(() => setWalletCopied(false), 2000)
     } catch {
-      // Fallback
       const el = document.createElement('textarea')
-      el.value = WALLET_ADDRESS
+      el.value = WALLETS[selectedWallet].address
       document.body.appendChild(el)
       el.select()
       document.execCommand('copy')
@@ -109,14 +123,16 @@ export default function LandingPage() {
       setWalletCopied(true)
       setTimeout(() => setWalletCopied(false), 2000)
     }
-  }, [])
+  }, [selectedWallet])
 
   const handleSendToTelegram = () => {
+    const wallet = WALLETS[selectedWallet]
     const message = encodeURIComponent(
       `🔑 طلب كود تفعيل Alfa Option\n\n` +
       `📋 رقم المرجع: ${paymentId}\n` +
       `💰 المبلغ: ${SUBSCRIPTION_PRICE} USDT\n` +
-      `🌐 الشبكة: ${WALLET_NETWORK}\n\n` +
+      `🌐 الشبكة: ${wallet.network}\n` +
+      `📍 المحفظة: ${wallet.address}\n\n` +
       `✅ تم إرسال المبلغ لعنوان المحفظة\n` +
       `📸 مرفق سكرين شوت إثبات الدفع\n\n` +
       `⏳ بانتظار الكود...`
@@ -398,13 +414,28 @@ export default function LandingPage() {
                         <p className="text-[9px] text-[#A9B5CB] text-center mt-1">احتفظ بهذا الرقم — سيُستخدم لتتبع الدفع</p>
                       </div>
 
+                      {/* Network Tabs - BEP20 / TRC20 */}
+                      <div className="flex gap-1 bg-[#222940] rounded-lg p-1">
+                        {WALLETS.map((w, i) => (
+                          <button
+                            key={i}
+                            onClick={() => { setSelectedWallet(i); setWalletCopied(false) }}
+                            className={`flex-1 py-2.5 rounded-md text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${selectedWallet === i ? 'shadow-md text-white' : 'text-[#A9B5CB] hover:text-[#F5F5F5]'}`}
+                            style={selectedWallet === i ? { backgroundColor: w.color } : {}}
+                          >
+                            <Wallet className="w-3.5 h-3.5" />
+                            {w.networkShort}
+                          </button>
+                        ))}
+                      </div>
+
                       {/* Wallet Info Card */}
                       <div className="bg-[#20283D] rounded-xl p-4 border border-[#FFD700]/20">
                         <div className="flex items-center gap-2 mb-3">
                           <Wallet className="w-5 h-5 text-[#FFD700]" />
                           <h3 className="text-sm font-bold text-[#F5F5F5]">عنوان المحفظة</h3>
-                          <span className="mr-auto px-2 py-0.5 rounded-full bg-[#2F96F0]/10 border border-[#2F96F0]/30 text-[9px] font-bold text-[#2F96F0]">
-                            {WALLET_NETWORK}
+                          <span className="mr-auto px-2 py-0.5 rounded-full text-[9px] font-bold" style={{ backgroundColor: `${WALLETS[selectedWallet].color}20`, color: WALLETS[selectedWallet].color, border: `1px solid ${WALLETS[selectedWallet].color}50` }}>
+                            {WALLETS[selectedWallet].network}
                           </span>
                         </div>
 
@@ -412,19 +443,32 @@ export default function LandingPage() {
                         <div className="bg-[#272E4A] rounded-lg p-3 mb-3 text-center">
                           <p className="text-[10px] text-[#A9B5CB] mb-1">المبلغ المطلوب</p>
                           <p className="text-3xl font-black text-[#FFD700]">{SUBSCRIPTION_PRICE}</p>
-                          <p className="text-[10px] text-[#A9B5CB]">{WALLET_CURRENCY} على شبكة {WALLET_NETWORK}</p>
+                          <p className="text-[10px] text-[#A9B5CB]">{WALLETS[selectedWallet].currency} على شبكة {WALLETS[selectedWallet].networkShort}</p>
+                        </div>
+
+                        {/* QR Code */}
+                        <div className="bg-[#272E4A] rounded-lg p-3 mb-3 flex justify-center">
+                          <div className="relative w-40 h-40 rounded-lg overflow-hidden border-2" style={{ borderColor: `${WALLETS[selectedWallet].color}50` }}>
+                            <Image
+                              src={WALLETS[selectedWallet].qrImage}
+                              alt={`QR Code ${WALLETS[selectedWallet].networkShort}`}
+                              fill
+                              className="object-contain"
+                            />
+                          </div>
                         </div>
 
                         {/* Wallet address */}
                         <div className="bg-[#272E4A] rounded-lg p-3 mb-3">
                           <p className="text-[10px] text-[#A9B5CB] mb-1.5">عنوان المحفظة:</p>
                           <div className="flex items-center gap-2">
-                            <p className="text-[11px] font-mono text-[#F5F5F5] break-all flex-1 leading-relaxed" dir="ltr">{WALLET_ADDRESS}</p>
+                            <p className="text-[11px] font-mono text-[#F5F5F5] break-all flex-1 leading-relaxed" dir="ltr">{WALLETS[selectedWallet].address}</p>
                             <button
                               onClick={copyWalletAddress}
-                              className="flex-shrink-0 w-8 h-8 rounded-lg bg-[#2F96F0]/20 flex items-center justify-center hover:bg-[#2F96F0]/30 transition-all"
+                              className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                              style={{ backgroundColor: `${WALLETS[selectedWallet].color}20` }}
                             >
-                              {walletCopied ? <Check className="w-4 h-4 text-[#57BC9A]" /> : <Copy className="w-4 h-4 text-[#2F96F0]" />}
+                              {walletCopied ? <Check className="w-4 h-4 text-[#57BC9A]" /> : <Copy className="w-4 h-4" style={{ color: WALLETS[selectedWallet].color }} />}
                             </button>
                           </div>
                           {walletCopied && (
@@ -434,8 +478,8 @@ export default function LandingPage() {
 
                         {/* Step indicator */}
                         <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-full bg-[#2F96F0] flex items-center justify-center text-[10px] font-black text-white flex-shrink-0">1</span>
-                          <p className="text-[11px] text-[#A9B5CB]">أرسل {SUBSCRIPTION_PRICE} {WALLET_CURRENCY} للعنوان أعلاه</p>
+                          <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black text-white flex-shrink-0" style={{ backgroundColor: WALLETS[selectedWallet].color }}>1</span>
+                          <p className="text-[11px] text-[#A9B5CB]">أرسل {SUBSCRIPTION_PRICE} {WALLETS[selectedWallet].currency} على شبكة {WALLETS[selectedWallet].networkShort} للعنوان أعلاه</p>
                         </div>
                       </div>
 
@@ -531,7 +575,11 @@ export default function LandingPage() {
                           </div>
                           <div className="flex items-center justify-between text-[10px]">
                             <span className="text-[#A9B5CB]">المبلغ:</span>
-                            <span className="font-bold text-[#FFD700]">{SUBSCRIPTION_PRICE} {WALLET_CURRENCY}</span>
+                            <span className="font-bold text-[#FFD700]">{SUBSCRIPTION_PRICE} USDT</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-[#A9B5CB]">الشبكة:</span>
+                            <span className="font-bold" style={{ color: WALLETS[selectedWallet].color }}>{WALLETS[selectedWallet].network}</span>
                           </div>
                           <div className="flex items-center justify-between text-[10px]">
                             <span className="text-[#A9B5CB]">القناة:</span>
