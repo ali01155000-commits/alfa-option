@@ -84,7 +84,7 @@ interface TradingStore {
   // Expert Option connection
   eoConnection: EOConnection
   setEOConnection: (conn: Partial<EOConnection>) => void
-  eoLogin: (token: string, isDemo: boolean) => Promise<boolean>
+  eoLogin: (email: string, password: string, isDemo: boolean) => Promise<boolean>
   eoLogout: () => Promise<void>
   eoRefreshProfile: () => Promise<void>
   eoPlaceTrade: (pair: string, direction: 'buy' | 'sell', amount: number, expiryMinutes: number) => Promise<boolean>
@@ -162,47 +162,8 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
     eoConnection: { ...state.eoConnection, ...conn }
   })),
   
-  eoLogin: async (token, isDemo) => {
-    try {
-      const res = await fetch(`${EO_API}/api/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, is_demo: isDemo }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: 'Connection failed' }))
-        throw new Error(err.detail || 'Login failed')
-      }
-      const data = await res.json()
-      set({
-        eoConnection: {
-          isLoggedIn: true,
-          isDemo,
-          token,
-          realBalance: data.balance || 10000,
-          autoTrading: false,
-          dailyPnl: 0,
-        },
-        balance: data.balance || 10000,
-      })
-      return true
-    } catch (e) {
-      console.error('EO Login error:', e)
-      set({
-        eoConnection: {
-          isLoggedIn: false,
-          isDemo: true,
-          token: '',
-          realBalance: 0,
-          autoTrading: false,
-          dailyPnl: 0,
-        }
-      })
-      return false
-    }
-  },
-
-  eoEmailLogin: async (email, password, isDemo) => {
+  // Auto-login: email + password → Playwright gets token automatically
+  eoLogin: async (email, password, isDemo) => {
     try {
       const res = await fetch(`${EO_API}/api/login-email`, {
         method: 'POST',
@@ -227,7 +188,17 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
       })
       return true
     } catch (e) {
-      console.error('EO Email Login error:', e)
+      console.error('EO Auto-Login error:', e)
+      set({
+        eoConnection: {
+          isLoggedIn: false,
+          isDemo: true,
+          token: '',
+          realBalance: 0,
+          autoTrading: false,
+          dailyPnl: 0,
+        }
+      })
       return false
     }
   },

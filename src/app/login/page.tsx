@@ -5,45 +5,47 @@ import { useRouter } from 'next/navigation'
 import { useTradingStore } from '@/store/trading-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Key, Info } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Info, Bot, CheckCircle2, Loader2 } from 'lucide-react'
 
-// Dynamic API URL - works both locally and online (Caddy proxies /api/* → port 3004)
+// Dynamic API URL - works both locally and online
 const getApiUrl = () => {
   if (typeof window === 'undefined') return 'http://localhost:3004'
   return window.location.origin
 }
-const EO_API = getApiUrl()
 
 export default function LoginPage() {
   const router = useRouter()
-  const { eoLogin } = useTradingStore()
 
-  // Email login state
+  // Login state
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isDemo, setIsDemo] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [step, setStep] = useState<'idle' | 'opening' | 'logging' | 'extracting' | 'connecting'>('idle')
 
-  // Token login state
-  const [token, setToken] = useState('')
-  const [showToken, setShowToken] = useState(false)
-
-  // Login method
-  const [loginMethod, setLoginMethod] = useState<'email' | 'token'>('email')
-
-  const handleEmailLogin = async () => {
+  const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       setError('الرجاء إدخال الإيميل والباسورد')
       return
     }
     setLoading(true)
     setError('')
+    setStep('opening')
+
+    const EO_API = getApiUrl()
 
     try {
+      // Step 1: Opening browser
+      await new Promise(r => setTimeout(r, 1500))
+      setStep('logging')
+
+      // Step 2: Logging in
+      await new Promise(r => setTimeout(r, 1500))
+      setStep('extracting')
+
       const res = await fetch(`${EO_API}/api/login-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,6 +58,10 @@ export default function LoginPage() {
       }
 
       const data = await res.json()
+
+      // Step 3: Connecting
+      setStep('connecting')
+      await new Promise(r => setTimeout(r, 1000))
 
       // Update store
       useTradingStore.getState().setEOConnection({
@@ -70,28 +76,18 @@ export default function LoginPage() {
 
       router.push('/')
     } catch (e: any) {
-      setError(e.message || 'فشل الاتصال')
+      setError(e.message || 'فشل الاتصال - تأكد من الإيميل والباسورد')
+      setStep('idle')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleTokenLogin = async () => {
-    if (!token.trim()) {
-      setError('الرجاء إدخال الـ SSID Token')
-      return
-    }
-    setLoading(true)
-    setError('')
-
-    const success = await eoLogin(token.trim(), isDemo)
-    setLoading(false)
-
-    if (success) {
-      router.push('/')
-    } else {
-      setError('فشل الاتصال - تأكد من صحة الـ Token')
-    }
+  const stepLabels: Record<string, { text: string; icon: React.ReactNode }> = {
+    opening: { text: 'فتح المتصفح...', icon: <Zap className="w-4 h-4 animate-pulse" /> },
+    logging: { text: 'تسجيل الدخول...', icon: <LogIn className="w-4 h-4 animate-pulse" /> },
+    extracting: { text: 'استخراج التوكن تلقائي...', icon: <Bot className="w-4 h-4 animate-pulse" /> },
+    connecting: { text: 'ربط الحساب...', icon: <CheckCircle2 className="w-4 h-4 animate-pulse text-[#57BC9A]" /> },
   }
 
   return (
@@ -130,173 +126,118 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {/* Login Method Tabs */}
+        {/* Login Card */}
         <Card className="border-[#3A4568] bg-[#2D3651] shadow-xl">
-          <CardContent className="p-0">
-            <Tabs defaultValue="email" onValueChange={(v) => { setLoginMethod(v as any); setError('') }}>
-              <TabsList className="w-full grid grid-cols-2 rounded-none rounded-t-lg bg-[#222940] h-10">
-                <TabsTrigger value="email" className="text-xs gap-1 data-[state=active]:bg-[#2F96F0] data-[state=active]:text-white rounded-none">
-                  <Mail className="w-3.5 h-3.5" />
-                  إيميل + باسورد
-                </TabsTrigger>
-                <TabsTrigger value="token" className="text-xs gap-1 data-[state=active]:bg-[#2F96F0] data-[state=active]:text-white rounded-none">
-                  <Key className="w-3.5 h-3.5" />
-                  SSID Token
-                </TabsTrigger>
-              </TabsList>
+          <CardContent className="p-5 space-y-4">
+            {/* Auto login badge */}
+            <div className="bg-[#57BC9A]/8 border border-[#57BC9A]/20 rounded-lg p-3">
+              <div className="flex items-center gap-2">
+                <Bot className="w-4 h-4 text-[#57BC9A]" />
+                <span className="text-xs font-bold text-[#57BC9A]">تسجيل دخول تلقائي 100%</span>
+              </div>
+              <p className="text-[10px] text-[#A9B5CB] mt-1.5 leading-relaxed">
+                اكتب إيميلك وباسوردك بس — البوت يفتح Expert Option في الخلفية، يسجل دخولك، يجيب التوكن، ويربط حسابك. كل شي تلقائي!
+              </p>
+            </div>
 
-              {/* Email Login */}
-              <TabsContent value="email" className="p-4 space-y-3 mt-0">
-                <div className="bg-[#57BC9A]/8 border border-[#57BC9A]/20 rounded-lg p-2.5 mb-1">
-                  <div className="flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-[#57BC9A]" />
-                    <span className="text-[10px] font-bold text-[#57BC9A]">تسجيل دخول تلقائي!</span>
-                  </div>
-                  <p className="text-[9px] text-[#A9B5CB] mt-1">
-                    أدخل إيميلك وباسوردك والنظام يسجل دخولك تلقائي ويجيب الرصيد
-                  </p>
-                </div>
+            {/* Email */}
+            <div>
+              <label className="text-xs text-[#A9B5CB] mb-1.5 block font-medium">الإيميل</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A9B5CB]" />
+                <Input
+                  type="email"
+                  placeholder="example@email.com"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); setError('') }}
+                  className="bg-[#20283D] border-[#3A4568] text-[#F5F5F5] h-12 pl-10 text-sm placeholder:text-[#3A4568]"
+                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                  disabled={loading}
+                />
+              </div>
+            </div>
 
-                <div>
-                  <label className="text-xs text-[#A9B5CB] mb-1.5 block font-medium">الإيميل</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A9B5CB]" />
-                    <Input
-                      type="email"
-                      placeholder="example@email.com"
-                      value={email}
-                      onChange={(e) => { setEmail(e.target.value); setError('') }}
-                      className="bg-[#20283D] border-[#3A4568] text-[#F5F5F5] h-11 pl-10 text-sm"
-                      onKeyDown={(e) => e.key === 'Enter' && handleEmailLogin()}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs text-[#A9B5CB] mb-1.5 block font-medium">الباسورد</label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A9B5CB]" />
-                    <Input
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => { setPassword(e.target.value); setError('') }}
-                      className="bg-[#20283D] border-[#3A4568] text-[#F5F5F5] h-11 pl-10 pr-10 text-sm"
-                      onKeyDown={(e) => e.key === 'Enter' && handleEmailLogin()}
-                    />
-                    <button
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#A9B5CB] hover:text-[#F5F5F5]"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Error */}
-                {error && (
-                  <div className="bg-[#D0011B]/10 border border-[#D0011B]/30 rounded-lg p-2.5 flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-[#D0011B] flex-shrink-0 mt-0.5" />
-                    <span className="text-xs text-[#D0011B]">{error}</span>
-                  </div>
-                )}
-
-                <Button
-                  onClick={handleEmailLogin}
-                  disabled={loading || !email.trim() || !password.trim()}
-                  className="w-full h-12 text-sm font-bold bg-[#2F96F0] hover:bg-[#1A7DE8] text-white rounded-lg shadow-lg shadow-[#2F96F0]/20"
+            {/* Password */}
+            <div>
+              <label className="text-xs text-[#A9B5CB] mb-1.5 block font-medium">الباسورد</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A9B5CB]" />
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError('') }}
+                  className="bg-[#20283D] border-[#3A4568] text-[#F5F5F5] h-12 pl-10 pr-10 text-sm placeholder:text-[#3A4568]"
+                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                  disabled={loading}
+                />
+                <button
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#A9B5CB] hover:text-[#F5F5F5]"
+                  type="button"
                 >
-                  {loading ? (
-                    <span className="flex items-center gap-2">
-                      <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      جاري تسجيل الدخول تلقائي...
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <LogIn className="w-4 h-4" />
-                      تسجيل الدخول
-                    </span>
-                  )}
-                </Button>
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
 
-                <div className="bg-[#20283D] rounded-lg p-2.5 border border-[#3A4568]">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <Info className="w-3 h-3 text-[#2F96F0]" />
-                    <span className="text-[9px] font-bold text-[#F5F5F5]">كيف يشتغل؟</span>
-                  </div>
-                  <p className="text-[9px] text-[#A9B5CB] leading-relaxed">
-                    النظام يفتح Expert Option في متصفح خفي (headless)، يسجل دخولك بإيميلك وباسوردك، يجيب الـ SSID Token من الـ Cookies تلقائي، ويربط حسابك. كل شي تلقائي! 🚀
-                  </p>
+            {/* Error */}
+            {error && (
+              <div className="bg-[#D0011B]/10 border border-[#D0011B]/30 rounded-lg p-3 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-[#D0011B] flex-shrink-0 mt-0.5" />
+                <span className="text-xs text-[#D0011B]">{error}</span>
+              </div>
+            )}
+
+            {/* Login Button */}
+            <Button
+              onClick={handleLogin}
+              disabled={loading || !email.trim() || !password.trim()}
+              className="w-full h-12 text-sm font-bold bg-[#2F96F0] hover:bg-[#1A7DE8] text-white rounded-lg shadow-lg shadow-[#2F96F0]/20"
+            >
+              {loading && step && stepLabels[step] ? (
+                <span className="flex items-center gap-2">
+                  {stepLabels[step].icon}
+                  {stepLabels[step].text}
+                </span>
+              ) : loading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  جاري التسجيل...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <LogIn className="w-4 h-4" />
+                  تسجيل الدخول
+                </span>
+              )}
+            </Button>
+
+            {/* How it works */}
+            <div className="bg-[#20283D] rounded-lg p-3 border border-[#3A4568]">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Info className="w-3.5 h-3.5 text-[#2F96F0]" />
+                <span className="text-[10px] font-bold text-[#F5F5F5]">كيف يشتغل البوت؟</span>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-[10px] text-[#A9B5CB]">
+                  <span className="w-5 h-5 rounded-full bg-[#2F96F0]/20 text-[#2F96F0] flex items-center justify-center text-[9px] font-bold flex-shrink-0">1</span>
+                  <span>البوت يفتح Expert Option في متصفح خفي (Headless Chrome)</span>
                 </div>
-              </TabsContent>
-
-              {/* Token Login (Advanced) */}
-              <TabsContent value="token" className="p-4 space-y-3 mt-0">
-                <div className="bg-[#2F96F0]/8 border border-[#2F96F0]/15 rounded-lg p-2.5 mb-1">
-                  <p className="text-[9px] text-[#A9B5CB]">
-                    <strong className="text-[#F5F5F5]">للمتقدمين:</strong> لو عندك الـ SSID Token، ادخله مباشرة. الطريقة العادية بالإيميل أسهل! 👆
-                  </p>
+                <div className="flex items-center gap-2 text-[10px] text-[#A9B5CB]">
+                  <span className="w-5 h-5 rounded-full bg-[#2F96F0]/20 text-[#2F96F0] flex items-center justify-center text-[9px] font-bold flex-shrink-0">2</span>
+                  <span>يسجل دخولك بإيميلك وباسوردك على الموقع</span>
                 </div>
-
-                <div>
-                  <label className="text-xs text-[#A9B5CB] mb-1.5 block font-medium">SSID Token</label>
-                  <div className="relative">
-                    <Input
-                      type={showToken ? 'text' : 'password'}
-                      placeholder="أدخل الـ SSID Token"
-                      value={token}
-                      onChange={(e) => { setToken(e.target.value); setError('') }}
-                      className="font-mono text-sm bg-[#20283D] border-[#3A4568] text-[#F5F5F5] h-11 pr-10"
-                      onKeyDown={(e) => e.key === 'Enter' && handleTokenLogin()}
-                    />
-                    <button
-                      onClick={() => setShowToken(!showToken)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#A9B5CB] hover:text-[#F5F5F5]"
-                    >
-                      {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
+                <div className="flex items-center gap-2 text" style={{ fontSize: '10px', color: '#A9B5CB' }}>
+                  <span className="w-5 h-5 rounded-full bg-[#2F96F0]/20 text-[#2F96F0] flex items-center justify-center flex-shrink-0" style={{ fontSize: '9px', fontWeight: 'bold' }}>3</span>
+                  <span>يستخرج الـ SSID Token من الـ Cookies تلقائي</span>
                 </div>
-
-                {error && (
-                  <div className="bg-[#D0011B]/10 border border-[#D0011B]/30 rounded-lg p-2.5 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-[#D0011B] flex-shrink-0" />
-                    <span className="text-xs text-[#D0011B]">{error}</span>
-                  </div>
-                )}
-
-                <Button
-                  onClick={handleTokenLogin}
-                  disabled={loading || !token.trim()}
-                  className="w-full h-11 text-sm font-bold bg-[#2F96F0] hover:bg-[#1A7DE8] text-white rounded-lg shadow-lg shadow-[#2F96F0]/20"
-                >
-                  {loading ? (
-                    <span className="flex items-center gap-2">
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      جاري الاتصال...
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <Key className="w-4 h-4" />
-                      تسجيل دخول بالـ Token
-                    </span>
-                  )}
-                </Button>
-
-                {/* How to get token - collapsed */}
-                <details className="text-[#A9B5CB]">
-                  <summary className="text-[10px] cursor-pointer hover:text-[#F5F5F5] transition-colors">
-                    كيف تجيب الـ Token؟ (اضغط هنا)
-                  </summary>
-                  <div className="mt-2 space-y-1.5 text-[10px] text-[#A9B5CB]/80">
-                    <p>1. افتح expertoption.com وسجل دخول</p>
-                    <p>2. اضغط F12 → Application → Cookies</p>
-                    <p>3. دور على كوكي <strong className="text-[#F5F5F5]">ssid</strong> وانسخ قيمتها</p>
-                    <p>4. أو في Console: <code className="bg-[#20283D] px-1 rounded font-mono text-[9px]">document.cookie.match(/ssid=([^;]+)/)[1]</code></p>
-                  </div>
-                </details>
-              </TabsContent>
-            </Tabs>
+                <div className="flex items-center gap-2 text" style={{ fontSize: '10px', color: '#A9B5CB' }}>
+                  <span className="w-5 h-5 rounded-full bg-[#57BC9A]/20 text-[#57BC9A] flex items-center justify-center flex-shrink-0" style={{ fontSize: '9px', fontWeight: 'bold' }}>4</span>
+                  <span>يربط حسابك ويجيب الرصيد — جاهز للتداول! 🚀</span>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -305,7 +246,7 @@ export default function LoginPage() {
           <div className="bg-[#D0011B]/8 border border-[#D0011B]/25 rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1.5">
               <Shield className="w-4 h-4 text-[#D0011B]" />
-              <h3 className="text-xs font-bold text-[#D0011B]">⚠️ تحذير: حساب حقيقي</h3>
+              <h3 className="text-xs font-bold text-[#D0011B]">تحذير: حساب حقيقي</h3>
             </div>
             <p className="text-[10px] text-[#D0011B]/80 leading-relaxed">
               أنت على وشك التداول بفلوس حقيقية. في Options، الخسارة ممكن تكون كاملة لمبلغ الصفقة. لا تتداول بأموال لا يمكنك تحمل خسارتها.
