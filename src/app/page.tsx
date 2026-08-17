@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTradingStore } from '@/store/trading-store'
 import { Button } from '@/components/ui/button'
@@ -10,11 +10,28 @@ import {
   Shield, Bot, Zap, TrendingUp, Star, Crown, CheckCircle2,
   Coins, Award, Sparkles, ChevronLeft, Key, ShoppingCart,
   BarChart3, Target, Brain, Cpu, ArrowRight, Lock,
-  AlertTriangle, Gift, Wallet
+  AlertTriangle, Gift, Wallet, Copy, Check, Send,
+  Camera, QrCode, MessageCircle, ExternalLink
 } from 'lucide-react'
 import Image from 'next/image'
 
 type PageState = 'landing' | 'activation' | 'success'
+type BuyStep = 'idle' | 'wallet' | 'screenshot' | 'send'
+
+// ============ WALLET ADDRESS ============
+// USDT TRC20 wallet for subscription payments
+const WALLET_ADDRESS = 'TKsMvr5FzYx5HqZqZJf8vX9KpW2nR7bL4E'
+const WALLET_NETWORK = 'TRC20 (TRON)'
+const WALLET_CURRENCY = 'USDT'
+const SUBSCRIPTION_PRICE = '$150'
+const TELEGRAM_CHANNEL = '@ALFa_proo'
+
+// Generate a unique payment reference ID
+function generatePaymentId(): string {
+  const timestamp = Date.now().toString(36).toUpperCase()
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase()
+  return `ALFA-${timestamp}-${random}`
+}
 
 export default function LandingPage() {
   const router = useRouter()
@@ -39,8 +56,14 @@ export default function LandingPage() {
   const [verifying, setVerifying] = useState(false)
   const [error, setError] = useState('')
 
+  // Buy flow state
+  const [buyStep, setBuyStep] = useState<BuyStep>('idle')
+  const [paymentId, setPaymentId] = useState('')
+  const [walletCopied, setWalletCopied] = useState(false)
+
   const handleEnterBot = () => {
     setPageState('activation')
+    setBuyStep('idle')
   }
 
   const handleVerifyCode = async () => {
@@ -64,7 +87,41 @@ export default function LandingPage() {
   }
 
   const handleBuyCode = () => {
-    window.open('https://t.me/alfaoption_bot', '_blank')
+    // Generate unique payment ID
+    const newPaymentId = generatePaymentId()
+    setPaymentId(newPaymentId)
+    setBuyStep('wallet')
+  }
+
+  const copyWalletAddress = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(WALLET_ADDRESS)
+      setWalletCopied(true)
+      setTimeout(() => setWalletCopied(false), 2000)
+    } catch {
+      // Fallback
+      const el = document.createElement('textarea')
+      el.value = WALLET_ADDRESS
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+      setWalletCopied(true)
+      setTimeout(() => setWalletCopied(false), 2000)
+    }
+  }, [])
+
+  const handleSendToTelegram = () => {
+    const message = encodeURIComponent(
+      `🔑 طلب كود تفعيل Alfa Option\n\n` +
+      `📋 رقم المرجع: ${paymentId}\n` +
+      `💰 المبلغ: ${SUBSCRIPTION_PRICE} USDT\n` +
+      `🌐 الشبكة: ${WALLET_NETWORK}\n\n` +
+      `✅ تم إرسال المبلغ لعنوان المحفظة\n` +
+      `📸 مرفق سكرين شوت إثبات الدفع\n\n` +
+      `⏳ بانتظار الكود...`
+    )
+    window.open(`https://t.me/ALFa_proo?text=${message}`, '_blank')
   }
 
   return (
@@ -303,36 +360,241 @@ export default function LandingPage() {
                     </div>
                   </div>
 
-                  {/* Buy Code Button */}
-                  <Button
-                    onClick={handleBuyCode}
-                    className="w-full h-12 text-sm font-bold bg-gradient-to-r from-[#FFD700] to-[#FFA500] hover:from-[#FFC700] hover:to-[#FF9500] text-[#1A1F2E] rounded-xl shadow-lg shadow-[#FFD700]/20"
-                  >
-                    <ShoppingCart className="w-4 h-4 ml-1.5" />
-                    شراء كود تفعيل
-                  </Button>
-
-                  {/* Buy info */}
-                  <div className="bg-[#20283D] rounded-lg p-3 border border-[#3A4568]">
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <Gift className="w-3.5 h-3.5 text-[#FFD700]" />
-                      <span className="text-[10px] font-bold text-[#F5F5F5]">كيف تحصل على كود التفعيل؟</span>
+                  {/* ============ BUY CODE FLOW ============ */}
+                  {buyStep === 'idle' && (
+                    <div className="space-y-3">
+                      <Button
+                        onClick={handleBuyCode}
+                        className="w-full h-12 text-sm font-bold bg-gradient-to-r from-[#FFD700] to-[#FFA500] hover:from-[#FFC700] hover:to-[#FF9500] text-[#1A1F2E] rounded-xl shadow-lg shadow-[#FFD700]/20"
+                      >
+                        <ShoppingCart className="w-4 h-4 ml-1.5" />
+                        شراء كود تفعيل
+                      </Button>
+                      <div className="bg-[#20283D] rounded-lg p-3 border border-[#3A4568]">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <Gift className="w-3.5 h-3.5 text-[#FFD700]" />
+                          <span className="text-[10px] font-bold text-[#F5F5F5]">كيف تحصل على كود التفعيل؟</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] text-[#A9B5CB]">1️⃣ أرسل مبلغ الاشتراك {SUBSCRIPTION_PRICE} لعنوان المحفظة</p>
+                          <p className="text-[10px] text-[#A9B5CB]">2️⃣ التقط سكرين شوت لإثبات الدفع</p>
+                          <p className="text-[10px] text-[#A9B5CB]">3️⃣ أرسله لقناة تليجرام {TELEGRAM_CHANNEL}</p>
+                          <p className="text-[10px] text-[#A9B5CB]">4️⃣ هنرسلك كود التفعيل فوراً!</p>
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <p className="text-[10px] text-[#A9B5CB]">• اشترك شهرياً بـ $150 واحصل على الكود فوراً</p>
-                      <p className="text-[10px] text-[#A9B5CB]">• تواصل معنا على تليجرام لشراء الكود</p>
-                      <p className="text-[10px] text-[#A9B5CB]">• الكود يفتح لك كل مميزات البوت + نظام الحماية</p>
-                    </div>
-                  </div>
+                  )}
 
-                  {/* Back button */}
+                  {/* Step 1: Wallet Address */}
+                  {buyStep === 'wallet' && (
+                    <div className="space-y-3">
+                      {/* Payment ID */}
+                      <div className="bg-[#2F96F0]/10 border border-[#2F96F0]/30 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Key className="w-4 h-4 text-[#2F96F0]" />
+                          <span className="text-[10px] font-bold text-[#2F96F0]">رقم المرجع الخاص بك</span>
+                        </div>
+                        <p className="text-sm font-mono font-bold text-[#F5F5F5] text-center tracking-wider">{paymentId}</p>
+                        <p className="text-[9px] text-[#A9B5CB] text-center mt-1">احتفظ بهذا الرقم — سيُستخدم لتتبع الدفع</p>
+                      </div>
+
+                      {/* Wallet Info Card */}
+                      <div className="bg-[#20283D] rounded-xl p-4 border border-[#FFD700]/20">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Wallet className="w-5 h-5 text-[#FFD700]" />
+                          <h3 className="text-sm font-bold text-[#F5F5F5]">عنوان المحفظة</h3>
+                          <span className="mr-auto px-2 py-0.5 rounded-full bg-[#2F96F0]/10 border border-[#2F96F0]/30 text-[9px] font-bold text-[#2F96F0]">
+                            {WALLET_NETWORK}
+                          </span>
+                        </div>
+
+                        {/* Amount to send */}
+                        <div className="bg-[#272E4A] rounded-lg p-3 mb-3 text-center">
+                          <p className="text-[10px] text-[#A9B5CB] mb-1">المبلغ المطلوب</p>
+                          <p className="text-3xl font-black text-[#FFD700]">{SUBSCRIPTION_PRICE}</p>
+                          <p className="text-[10px] text-[#A9B5CB]">{WALLET_CURRENCY} على شبكة {WALLET_NETWORK}</p>
+                        </div>
+
+                        {/* Wallet address */}
+                        <div className="bg-[#272E4A] rounded-lg p-3 mb-3">
+                          <p className="text-[10px] text-[#A9B5CB] mb-1.5">عنوان المحفظة:</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-[11px] font-mono text-[#F5F5F5] break-all flex-1 leading-relaxed" dir="ltr">{WALLET_ADDRESS}</p>
+                            <button
+                              onClick={copyWalletAddress}
+                              className="flex-shrink-0 w-8 h-8 rounded-lg bg-[#2F96F0]/20 flex items-center justify-center hover:bg-[#2F96F0]/30 transition-all"
+                            >
+                              {walletCopied ? <Check className="w-4 h-4 text-[#57BC9A]" /> : <Copy className="w-4 h-4 text-[#2F96F0]" />}
+                            </button>
+                          </div>
+                          {walletCopied && (
+                            <p className="text-[9px] text-[#57BC9A] font-bold mt-1 text-center">✅ تم النسخ!</p>
+                          )}
+                        </div>
+
+                        {/* Step indicator */}
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-[#2F96F0] flex items-center justify-center text-[10px] font-black text-white flex-shrink-0">1</span>
+                          <p className="text-[11px] text-[#A9B5CB]">أرسل {SUBSCRIPTION_PRICE} {WALLET_CURRENCY} للعنوان أعلاه</p>
+                        </div>
+                      </div>
+
+                      <Button
+                        onClick={() => setBuyStep('screenshot')}
+                        className="w-full h-11 text-sm font-bold bg-[#2F96F0] hover:bg-[#1A7DE8] text-white rounded-xl"
+                      >
+                        تم الإرسال ← الخطوة التالية
+                        <ArrowRight className="w-4 h-4 mr-1" />
+                      </Button>
+
+                      <Button
+                        onClick={() => setBuyStep('idle')}
+                        variant="ghost"
+                        className="w-full text-[#A9B5CB] text-xs hover:bg-[#20283D]"
+                      >
+                        <ChevronLeft className="w-3 h-3 ml-1" />
+                        رجوع
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Step 2: Screenshot */}
+                  {buyStep === 'screenshot' && (
+                    <div className="space-y-3">
+                      <div className="bg-[#20283D] rounded-xl p-4 border border-[#57BC9A]/20">
+                        <div className="text-center mb-3">
+                          <div className="w-14 h-14 rounded-2xl bg-[#57BC9A]/10 flex items-center justify-center mx-auto mb-2">
+                            <Camera className="w-7 h-7 text-[#57BC9A]" />
+                          </div>
+                          <h3 className="text-sm font-bold text-[#F5F5F5]">التقط سكرين شوت</h3>
+                          <p className="text-[10px] text-[#A9B5CB] mt-1">صوّر إثبات الدفع من تطبيق المحفظة</p>
+                        </div>
+
+                        <div className="space-y-2">
+                          {[
+                            'افتح تطبيق المحفظة اللي أرسلت منها',
+                            'روح لصفحة تأكيد التحويل',
+                            'صوّر السكرين شوت (يوضح المبلغ + العنوان + التاريخ)',
+                            'تأكد إن الصورة واضحة ومقروءة',
+                          ].map((text, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-[#57BC9A]/20 text-[#57BC9A] flex items-center justify-center text-[9px] font-bold flex-shrink-0 mt-0.5">
+                                {i + 1}
+                              </span>
+                              <p className="text-[10px] text-[#A9B5CB] leading-relaxed">{text}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-3">
+                          <span className="w-6 h-6 rounded-full bg-[#57BC9A] flex items-center justify-center text-[10px] font-black text-white flex-shrink-0">2</span>
+                          <p className="text-[11px] text-[#A9B5CB]">التقط سكرين شوت لإثبات الدفع</p>
+                        </div>
+                      </div>
+
+                      <Button
+                        onClick={() => setBuyStep('send')}
+                        className="w-full h-11 text-sm font-bold bg-[#57BC9A] hover:bg-[#4AA88A] text-white rounded-xl"
+                      >
+                        عندي السكرين شوت ← الخطوة التالية
+                        <ArrowRight className="w-4 h-4 mr-1" />
+                      </Button>
+
+                      <Button
+                        onClick={() => setBuyStep('wallet')}
+                        variant="ghost"
+                        className="w-full text-[#A9B5CB] text-xs hover:bg-[#20283D]"
+                      >
+                        <ChevronLeft className="w-3 h-3 ml-1" />
+                        رجوع
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Step 3: Send to Telegram */}
+                  {buyStep === 'send' && (
+                    <div className="space-y-3">
+                      <div className="bg-[#20283D] rounded-xl p-4 border border-[#0088CC]/20">
+                        <div className="text-center mb-3">
+                          <div className="w-14 h-14 rounded-2xl bg-[#0088CC]/10 flex items-center justify-center mx-auto mb-2">
+                            <Send className="w-7 h-7 text-[#0088CC]" />
+                          </div>
+                          <h3 className="text-sm font-bold text-[#F5F5F5]">أرسل لقناة تليجرام</h3>
+                          <p className="text-[10px] text-[#A9B5CB] mt-1">أرسل السكرين شوت + رقم المرجع لقناة الدعم</p>
+                        </div>
+
+                        {/* Summary */}
+                        <div className="bg-[#272E4A] rounded-lg p-3 mb-3 space-y-1.5">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-[#A9B5CB]">رقم المرجع:</span>
+                            <span className="font-mono font-bold text-[#2F96F0]" dir="ltr">{paymentId}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-[#A9B5CB]">المبلغ:</span>
+                            <span className="font-bold text-[#FFD700]">{SUBSCRIPTION_PRICE} {WALLET_CURRENCY}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-[#A9B5CB]">القناة:</span>
+                            <span className="font-bold text-[#0088CC]">{TELEGRAM_CHANNEL}</span>
+                          </div>
+                        </div>
+
+                        <div className="bg-[#0088CC]/10 rounded-lg p-3 border border-[#0088CC]/20">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <MessageCircle className="w-4 h-4 text-[#0088CC]" />
+                            <span className="text-[10px] font-bold text-[#0088CC]">الرسالة تتكون تلقائي</span>
+                          </div>
+                          <p className="text-[10px] text-[#A9B5CB] leading-relaxed">
+                            لما تضغط الزرار، تليجرام هيفتح برسالة جاهزة فيها رقم المرجع والمبلغ — بس أرفق السكرين شوت وأرسل!
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-3">
+                          <span className="w-6 h-6 rounded-full bg-[#0088CC] flex items-center justify-center text-[10px] font-black text-white flex-shrink-0">3</span>
+                          <p className="text-[11px] text-[#A9B5CB]">أرسل السكرين شوت لقناة {TELEGRAM_CHANNEL}</p>
+                        </div>
+                      </div>
+
+                      {/* SEND TO TELEGRAM BUTTON */}
+                      <Button
+                        onClick={handleSendToTelegram}
+                        className="w-full h-12 text-sm font-bold bg-gradient-to-r from-[#0088CC] to-[#006699] hover:from-[#0077BB] hover:to-[#005588] text-white rounded-xl shadow-lg shadow-[#0088CC]/20"
+                      >
+                        <Send className="w-4 h-4 ml-1.5" />
+                        أرسل لـ {TELEGRAM_CHANNEL}
+                        <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                      </Button>
+
+                      {/* After sending */}
+                      <div className="bg-[#57BC9A]/10 border border-[#57BC9A]/20 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <CheckCircle2 className="w-4 h-4 text-[#57BC9A]" />
+                          <span className="text-[10px] font-bold text-[#57BC9A]">بعد الإرسال:</span>
+                        </div>
+                        <p className="text-[10px] text-[#A9B5CB] leading-relaxed">
+                          هنراجع السكرين شوت ونرسلك كود التفعيل على نفس المحادثة. الكود يوصللك خلال دقائق!
+                        </p>
+                      </div>
+
+                      <Button
+                        onClick={() => setBuyStep('screenshot')}
+                        variant="ghost"
+                        className="w-full text-[#A9B5CB] text-xs hover:bg-[#20283D]"
+                      >
+                        <ChevronLeft className="w-3 h-3 ml-1" />
+                        رجوع
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Back to landing button */}
                   <Button
-                    onClick={() => setPageState('landing')}
+                    onClick={() => { setPageState('landing'); setBuyStep('idle') }}
                     variant="ghost"
                     className="w-full text-[#A9B5CB] hover:text-[#F5F5F5] hover:bg-[#20283D]"
                   >
                     <ChevronLeft className="w-4 h-4 ml-1" />
-                    رجوع
+                    رجوع للرئيسية
                   </Button>
                 </CardContent>
               </Card>
