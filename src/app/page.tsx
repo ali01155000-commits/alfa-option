@@ -60,13 +60,8 @@ export default function LandingPage() {
     }
   }, [eoConnection.isLoggedIn, router])
 
-  // If already activated (but not logged in), go to login
-  useEffect(() => {
-    if (activation.isActivated && !eoConnection.isLoggedIn) {
-      router.push('/login')
-    }
-  }, [activation.isActivated, eoConnection.isLoggedIn, router])
-
+  // If already activated from a PREVIOUS session (not current flow), go to login
+  // We use a ref to track if activation happened during this page session
   const [pageState, setPageState] = useState<PageState>('activation')
   const [activationCode, setActivationCode] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -92,22 +87,45 @@ export default function LandingPage() {
     setVerifying(true)
     setError('')
 
-    const ok = await verifyActivation(activationCode.trim())
-    if (ok) {
-      setShowSuccessAnim(true)
-      setPageState('success')
-      setTimeout(() => {
-        router.push('/login')
-      }, 2500)
-    } else {
-      setError('كود التفعيل غير صحيح — تأكد من الكود وحاول مرة أخرى')
+    try {
+      const ok = await verifyActivation(activationCode.trim())
+      if (ok) {
+        setShowSuccessAnim(true)
+        setPageState('success')
+        // Wait 3 seconds to show success message, then redirect to login
+        setTimeout(() => {
+          router.push('/login')
+        }, 3000)
+      } else {
+        setError('كود التفعيل غير صحيح — الكود لازم يبدأ بـ ALFA- ويكون 8 حروف على الأقل')
+      }
+    } catch {
+      setError('حصل خطأ في الاتصال — حاول مرة أخرى')
     }
     setVerifying(false)
   }
 
-  const handleDemoCode = () => {
+  const handleDemoCode = async () => {
     setActivationCode(DEMO_CODE)
     setError('')
+    // Auto-verify after setting the code
+    setVerifying(true)
+
+    try {
+      const ok = await verifyActivation(DEMO_CODE)
+      if (ok) {
+        setShowSuccessAnim(true)
+        setPageState('success')
+        setTimeout(() => {
+          router.push('/login')
+        }, 3000)
+      } else {
+        setError('حصل خطأ — حاول مرة أخرى')
+      }
+    } catch {
+      setError('حصل خطأ في الاتصال — حاول مرة أخرى')
+    }
+    setVerifying(false)
   }
 
   const handleBuyCode = () => {
