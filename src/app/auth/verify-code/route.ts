@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     const normalizedCode = code.trim().toUpperCase();
 
-    // Check if it's a valid code
+    // Check if it's a valid pre-defined code
     if (VALID_CODES.has(normalizedCode)) {
       return NextResponse.json({
         valid: true,

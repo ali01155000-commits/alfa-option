@@ -395,27 +395,31 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
     }
   }),
   verifyActivation: async (code) => {
-    // Check activation code with the backend
+    // Check activation code — uses /auth/ path so Caddy routes to Next.js (port 3000)
+    // NOT /api/ which Caddy routes to EO Bridge (port 3004)
     try {
-      const API = getApiUrl()
-      const res = await fetch(`${API}/api/verify-code`, {
+      // Use relative URL so it works through Caddy gateway and directly
+      const res = await fetch('/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
       })
       if (res.ok) {
-        set({
-          activation: {
-            isActivated: true,
-            activationCode: code,
-            activationDate: Date.now(),
-          }
-        })
-        return true
+        const data = await res.json()
+        if (data.valid) {
+          set({
+            activation: {
+              isActivated: true,
+              activationCode: code,
+              activationDate: Date.now(),
+            }
+          })
+          return true
+        }
       }
       return false
     } catch {
-      // If API not available, accept any code starting with "ALFA-" for demo
+      // If API not available (offline etc), accept any code starting with "ALFA-" for demo
       if (code.startsWith('ALFA-') && code.length >= 8) {
         set({
           activation: {
