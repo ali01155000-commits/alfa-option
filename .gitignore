@@ -52,3 +52,21 @@ prompt
 server.log
 # Skills directory
 /skills/
+# Android SDK & JDK (too large for git)
+/android-sdk/
+/jdk/
+/android/
+/capacitor.config.json
+
+# Tool results
+/tool-results/
+
+# Download directory (build artifacts)
+/download/*.apk
+/download/*.tar.gz
+/download/*.txt
+/download/*.json
+/download/*.csv
+
+# Database file (contains activation codes - keep separate)
+/db/*.db

@@ -400,12 +400,21 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
     // Check activation code — uses /auth/ path so Caddy routes to Next.js (port 3000)
     // NOT /api/ which Caddy routes to EO Bridge (port 3004)
     try {
-      // Use relative URL so it works through Caddy gateway and directly
+      // Get device fingerprint for one-device-per-code policy
+      const { getDeviceId, getDeviceInfo } = await import('@/lib/device-fingerprint')
+      const deviceId = getDeviceId()
+      const deviceInfo = getDeviceInfo()
+
       const res = await fetch('/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({
+          code,
+          device_id: deviceId,
+          device_info: deviceInfo,
+        }),
       })
+
       if (res.ok) {
         const data = await res.json()
         if (data.valid) {
@@ -418,20 +427,21 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
           })
           return true
         }
+      } else {
+        // Server returned error - show the error message
+        const errData = await res.json().catch(() => ({}))
+        if (errData.error) {
+          // Show the specific error message to the user
+          alert(errData.error)
+        }
       }
+
       return false
-    } catch {
-      // If API not available (offline etc), accept any code starting with "ALFA-" for demo
-      if (code.startsWith('ALFA-') && code.length >= 8) {
-        set({
-          activation: {
-            isActivated: true,
-            activationCode: code,
-            activationDate: Date.now(),
-          }
-        })
-        return true
-      }
+    } catch (e) {
+      // If API not available (offline etc), don't accept any code
+      // Require server connection for activation
+      console.error('Activation error:', e)
+      alert('مفيش اتصال بالسيرفر. تأكد من الإنترنت وحاول مرة تانية.')
       return false
     }
   },

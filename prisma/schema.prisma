@@ -139,3 +139,19 @@ model ProtectionClaim {
   status        String   @default("approved") // "pending", "approved", "rejected"
   createdAt     DateTime @default(now())
 }
+
+// ============ Activation Codes System ============
+// One-time use codes - each valid for 1 month, tied to one device
+model ActivationCode {
+  id              String    @id @default(cuid())
+  code            String    @unique        // ALFA-XXXX-XXXX format
+  status          String    @default("unused") // "unused", "used", "expired", "revoked"
+  usedBy          String?                  // email of user who used it
+  deviceId        String?                  // device fingerprint (one device per code)
+  deviceInfo      String?                  // human-readable device info
+  activatedAt     DateTime?                // when first used
+  expiresAt       DateTime?                // 30 days after activation
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  notes           String?                  // admin notes
+}
