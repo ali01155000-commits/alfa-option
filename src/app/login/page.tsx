@@ -28,7 +28,7 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [step, setStep] = useState<'idle' | 'opening' | 'logging' | 'extracting' | 'connecting'>('idle')
   const [deviceError, setDeviceError] = useState('')
-  const [mode, setMode] = useState<'auto' | 'token'>('auto')
+  const [mode, setMode] = useState<'auto' | 'token'>('token')
   const [ssidToken, setSsidToken] = useState('')
 
   const handleLogin = async () => {
@@ -231,13 +231,13 @@ export default function LoginPage() {
 
             {/* Auto login badge */}
             {mode === 'auto' && (
-            <div className="bg-[#57BC9A]/8 border border-[#57BC9A]/20 rounded-lg p-3">
+            <div className="bg-[#FF9F43]/10 border border-[#FF9F43]/25 rounded-lg p-3">
               <div className="flex items-center gap-2">
-                <Bot className="w-4 h-4 text-[#57BC9A]" />
-                <span className="text-xs font-bold text-[#57BC9A]">تسجيل دخول تلقائي 100%</span>
+                <Bot className="w-4 h-4 text-[#FF9F43]" />
+                <span className="text-xs font-bold text-[#FF9F43]">تسجيل تلقائي (قد لا يعمل في بعض الدول)</span>
               </div>
               <p className="text-[10px] text-[#A9B5CB] mt-1.5 leading-relaxed">
-                اكتب إيميلك وباسوردك بس — البوت يفتح Expert Option في الخلفية، يسجل دخولك، يجيب التوكن، ويربط حسابك. كل شي تلقائي!
+                البوت يفتح Expert Option في الخلفية ويسجل دخولك تلقائيًا — لكن الموقع يحجب الخدمة عن بعض الدول، وعندها استخدم وضع <span className="text-[#57BC9A] font-bold">SSID Token</span> المضمون.
               </p>
             </div>
             )}
