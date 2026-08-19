@@ -22,7 +22,8 @@ const expiryOptions = [
 
 const quickAmounts = [1, 5, 10, 25, 50, 100]
 
-const EO_API = 'http://localhost:3004'
+// Dynamic API URL - works both locally and online (Caddy proxies /api/* → port 3004)
+const EO_API = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3004'
 
 export function TradingPanel({ emit }: TradingPanelProps) {
   const { selectedPair, prices, balance, eoConnection, eoPlaceTrade } = useTradingStore()
