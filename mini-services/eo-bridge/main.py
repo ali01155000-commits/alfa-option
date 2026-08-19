@@ -32,6 +32,39 @@ except ImportError:
     EO_AVAILABLE = False
     print("⚠️ ExpertOptionAPI not available, running in simulation mode")
 
+# ============ Server Regions ============
+EO_REGIONS = [
+    "wss://fr24g1eu.expertoption.com/",   # Europe
+    "wss://fr24g1in.expertoption.com/",   # India
+    "wss://fr24g1hk.expertoption.com/",   # Hong Kong
+    "wss://fr24g1sg.expertoption.com/",   # Singapore
+    "wss://fr24g1us.expertoption.com/",   # United States
+]
+
+def connect_with_token(token: str):
+    """Connect to Expert Option, trying all server regions until one succeeds.
+    Set EO_SERVER_REGION env var to force a specific region."""
+    import random
+    forced = os.environ.get("EO_SERVER_REGION")
+    regions = [forced] if forced else EO_REGIONS[:]
+    if not forced:
+        random.shuffle(regions)
+    for region in regions:
+        try:
+            api = EoApi(token=token, server_region=region)
+            result = api.connect()
+            if result is not False:
+                logger.info(f"✅ Connected to Expert Option via region: {region}")
+                return api
+            try:
+                api.websocket_client.wss.close()
+            except:
+                pass
+            logger.info(f"⚠️ Region failed ({region}), trying next...")
+        except Exception as e:
+            logger.debug(f"Region {region} error: {e}")
+    return None
+
 # ============ Logging ============
 logging.basicConfig(
     level=logging.INFO,
@@ -797,7 +830,7 @@ def login_with_email(req: EmailLoginRequest):
     if not ssid_token:
         raise HTTPException(
             status_code=401, 
-            detail="Auto-login failed - could not obtain SSID token. Check your email/password or try the manual token method."
+            detail="فشل التسجيل التلقائي (حماية الموقع ممكن تكون وقفت البوت أو البيانات غلط) — جرب وضع SSID Token الأضمن",
         )
 
     # Now connect with the obtained token
@@ -814,10 +847,9 @@ def login_with_email(req: EmailLoginRequest):
 
         logger.info(f"🔐 Connecting with auto-obtained token: {ssid_token[:10]}...")
 
-        api = EoApi(token=ssid_token, server_region="wss://fr24g1eu.expertoption.com/")
-        result = api.connect()
+        api = connect_with_token(ssid_token)
 
-        if result is False:
+        if api is None:
             raise HTTPException(status_code=401, detail="Connection failed with auto-obtained token")
 
         state.api = api
@@ -883,11 +915,10 @@ def login(req: LoginRequest):
 
         logger.info(f"🔐 Connecting to Expert Option with token: {req.token[:15]}...")
 
-        api = EoApi(token=req.token, server_region="wss://fr24g1eu.expertoption.com/")
-        result = api.connect()
+        api = connect_with_token(req.token)
 
-        if result is False:
-            raise HTTPException(status_code=401, detail="Connection failed - invalid or expired token")
+        if api is None:
+            raise HTTPException(status_code=401, detail="فشل الاتصال — التوكن غير صحيح أو منتهي الصلاحية، اطلع توكن جديد من متصفحك")
 
         state.api = api
         state.token = req.token

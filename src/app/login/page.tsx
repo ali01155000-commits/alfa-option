@@ -6,7 +6,7 @@ import { useTradingStore } from '@/store/trading-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
-import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Info, Bot, CheckCircle2, Loader2, Coins } from 'lucide-react'
+import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Info, Bot, CheckCircle2, Loader2, Coins, KeyRound, ClipboardPaste } from 'lucide-react'
 import { BackButton } from '@/components/ui/back-button'
 import { bindAccountToDevice, getDeviceId, getDeviceInfo } from '@/lib/device-fingerprint'
 
@@ -28,6 +28,8 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [step, setStep] = useState<'idle' | 'opening' | 'logging' | 'extracting' | 'connecting'>('idle')
   const [deviceError, setDeviceError] = useState('')
+  const [mode, setMode] = useState<'auto' | 'token'>('auto')
+  const [ssidToken, setSsidToken] = useState('')
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -95,6 +97,54 @@ export default function LoginPage() {
     }
   }
 
+  // ===== Manual SSID Token Login (most reliable method) =====
+  const handleTokenLogin = async () => {
+    const token = ssidToken.trim()
+    if (!token || token.length < 20) {
+      setError('التوكن غير صالح — لازم تلصق قيمة كوكي ssid كاملة من متصفحك')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    setDeviceError('')
+    setStep('connecting')
+
+    const EO_API = getApiUrl()
+
+    try {
+      const res = await fetch(`${EO_API}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, is_demo: isDemo }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'فشل الاتصال بالتوكن' }))
+        throw new Error(err.detail || 'التوكن غير صحيح أو منتهي الصلاحية — اطلع توكن جديد من متصفحك وجرب تاني')
+      }
+
+      const data = await res.json()
+
+      useTradingStore.getState().setEOConnection({
+        isLoggedIn: true,
+        isDemo,
+        token,
+        realBalance: data.balance || 10000,
+        autoTrading: false,
+        dailyPnl: 0,
+      })
+      useTradingStore.getState().setBalance(data.balance || 10000)
+
+      router.push('/trading')
+    } catch (e: any) {
+      setError(e.message || 'فشل الاتصال بالتوكن')
+      setStep('idle')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const stepLabels: Record<string, { text: string; icon: React.ReactNode }> = {
     opening: { text: 'فتح المتصفح...', icon: <Zap className="w-4 h-4 animate-pulse" /> },
     logging: { text: 'تسجيل الدخول...', icon: <LogIn className="w-4 h-4 animate-pulse" /> },
@@ -153,7 +203,34 @@ export default function LoginPage() {
         {/* Login Card */}
         <Card className="border-[#3A4568] bg-[#2D3651] shadow-xl">
           <CardContent className="p-5 space-y-4">
+            {/* Login Mode Tabs */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { setMode('auto'); setError('') }}
+                className={`py-2.5 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  mode === 'auto'
+                    ? 'bg-[#2F96F0]/15 text-[#2F96F0] border-[#2F96F0]'
+                    : 'bg-[#20283D] border-[#3A4568] text-[#A9B5CB] hover:bg-[#3A4568]/50'
+                }`}
+              >
+                <Bot className="w-3.5 h-3.5" />
+                تلقائي (إيميل)
+              </button>
+              <button
+                onClick={() => { setMode('token'); setError('') }}
+                className={`py-2.5 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  mode === 'token'
+                    ? 'bg-[#57BC9A]/15 text-[#57BC9A] border-[#57BC9A]'
+                    : 'bg-[#20283D] border-[#3A4568] text-[#A9B5CB] hover:bg-[#3A4568]/50'
+                }`}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                SSID Token (مضمون)
+              </button>
+            </div>
+
             {/* Auto login badge */}
+            {mode === 'auto' && (
             <div className="bg-[#57BC9A]/8 border border-[#57BC9A]/20 rounded-lg p-3">
               <div className="flex items-center gap-2">
                 <Bot className="w-4 h-4 text-[#57BC9A]" />
@@ -163,8 +240,65 @@ export default function LoginPage() {
                 اكتب إيميلك وباسوردك بس — البوت يفتح Expert Option في الخلفية، يسجل دخولك، يجيب التوكن، ويربط حسابك. كل شي تلقائي!
               </p>
             </div>
+            )}
+
+            {/* SSID Token mode UI */}
+            {mode === 'token' && (
+              <>
+                <div className="bg-[#57BC9A]/8 border border-[#57BC9A]/20 rounded-lg p-3">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-[#57BC9A]" />
+                    <span className="text-xs font-bold text-[#57BC9A]">الدخول الأضمن — نجاح شبه مضمون</span>
+                  </div>
+                  <p className="text-[10px] text-[#A9B5CB] mt-1.5 leading-relaxed">
+                    بتلصق التوكن من متصفحك مباشرة — مفيش متصفح خفي ولا حماية بتوقفك.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-xs text-[#A9B5CB] mb-1.5 block font-medium">SSID Token</label>
+                  <div className="relative">
+                    <ClipboardPaste className="absolute left-3 top-4 w-4 h-4 text-[#A9B5CB]" />
+                    <textarea
+                      placeholder='الصق قيمة كوكي "ssid" من متصفحك هنا...'
+                      value={ssidToken}
+                      onChange={(e) => { setSsidToken(e.target.value); setError('') }}
+                      className="bg-[#20283D] border-[#3A4568] text-[#F5F5F5] rounded-lg pl-10 pr-3 py-3 text-xs placeholder:text-[#3A4568] w-full h-24 resize-none font-mono focus:outline-none focus:border-[#57BC9A]"
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+
+                {/* How to get SSID */}
+                <div className="bg-[#20283D] rounded-lg p-3 border border-[#3A4568]">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Info className="w-3.5 h-3.5 text-[#57BC9A]" />
+                    <span className="text-[10px] font-bold text-[#F5F5F5]">إزاي تجيب التوكن؟ (دقيقة واحدة)</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 text-[10px] text-[#A9B5CB]">
+                      <span className="w-5 h-5 rounded-full bg-[#57BC9A]/20 text-[#57BC9A] flex items-center justify-center text-[9px] font-bold flex-shrink-0">1</span>
+                      <span>افتح <span className="text-[#57BC9A] font-bold">expertoption.com</span> في متصفحك وسجل دخولك عادي</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-[#A9B5CB]">
+                      <span className="w-5 h-5 rounded-full bg-[#57BC9A]/20 text-[#57BC9A] flex items-center justify-center text-[9px] font-bold flex-shrink-0">2</span>
+                      <span>اضغط <span className="text-[#F5F5F5] font-bold">F12</span> → تبويب <span className="text-[#F5F5F5] font-bold">Application</span> → <span className="text-[#F5F5F5] font-bold">Cookies</span> → expertoption.com</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-[#A9B5CB]">
+                      <span className="w-5 h-5 rounded-full bg-[#57BC9A]/20 text-[#57BC9A] flex items-center justify-center text-[9px] font-bold flex-shrink-0">3</span>
+                      <span>دوّر على كوكي اسمه <span className="text-[#F5F5F5] font-bold">ssid</span> واعمل Copy لقيمة الـ Value</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-[#A9B5CB]">
+                      <span className="w-5 h-5 rounded-full bg-[#2F96F0]/20 text-[#2F96F0] flex items-center justify-center text-[9px] font-bold flex-shrink-0">4</span>
+                      <span>الصقه في الخانة فوق واضغط "دخول بالتوكن"</span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Email */}
+            {mode === 'auto' && (
             <div>
               <label className="text-xs text-[#A9B5CB] mb-1.5 block font-medium">الإيميل</label>
               <div className="relative">
@@ -204,20 +338,36 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
+            )}
 
             {/* Error */}
             {error && (
-              <div className="bg-[#D0011B]/10 border border-[#D0011B]/30 rounded-lg p-3 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-[#D0011B] flex-shrink-0 mt-0.5" />
-                <span className="text-xs text-[#D0011B]">{error}</span>
+              <div className="bg-[#D0011B]/10 border border-[#D0011B]/30 rounded-lg p-3 flex flex-col gap-1.5">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-[#D0011B] flex-shrink-0 mt-0.5" />
+                  <span className="text-xs text-[#D0011B]">{error}</span>
+                </div>
+                {mode === 'auto' && (
+                  <button
+                    onClick={() => { setMode('token'); setError('') }}
+                    className="text-[10px] text-[#57BC9A] font-bold underline underline-offset-2 text-right"
+                    type="button"
+                  >
+                    مش شغال؟ جرب وضع SSID Token الأضمن →
+                  </button>
+                )}
               </div>
             )}
 
             {/* Login Button */}
             <Button
-              onClick={handleLogin}
-              disabled={loading || !email.trim() || !password.trim()}
-              className="w-full h-12 text-sm font-bold bg-[#2F96F0] hover:bg-[#1A7DE8] text-white rounded-lg shadow-lg shadow-[#2F96F0]/20"
+              onClick={mode === 'auto' ? handleLogin : handleTokenLogin}
+              disabled={loading || (mode === 'auto' ? (!email.trim() || !password.trim()) : ssidToken.trim().length < 20)}
+              className={`w-full h-12 text-sm font-bold rounded-lg shadow-lg ${
+                mode === 'token'
+                  ? 'bg-[#57BC9A] hover:bg-[#4aa887] text-white shadow-[#57BC9A]/20'
+                  : 'bg-[#2F96F0] hover:bg-[#1A7DE8] text-white shadow-[#2F96F0]/20'
+              }`}
             >
               {loading && step && stepLabels[step] ? (
                 <span className="flex items-center gap-2">
@@ -229,6 +379,11 @@ export default function LoginPage() {
                   <Loader2 className="w-4 h-4 animate-spin" />
                   جاري التسجيل...
                 </span>
+              ) : mode === 'token' ? (
+                <span className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4" />
+                  دخول بالتوكن
+                </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <LogIn className="w-4 h-4" />
@@ -238,6 +393,7 @@ export default function LoginPage() {
             </Button>
 
             {/* How it works */}
+            {mode === 'auto' && (
             <div className="bg-[#20283D] rounded-lg p-3 border border-[#3A4568]">
               <div className="flex items-center gap-1.5 mb-2">
                 <Info className="w-3.5 h-3.5 text-[#2F96F0]" />
@@ -262,6 +418,7 @@ export default function LoginPage() {
                 </div>
               </div>
             </div>
+            )}
           </CardContent>
         </Card>
 
