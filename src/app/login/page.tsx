@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTradingStore } from '@/store/trading-store'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Info, Bot, CheckCircle2, Loader2, Coins, KeyRound, ClipboardPaste } from 'lucide-react'
 import { BackButton } from '@/components/ui/back-button'
 import { bindAccountToDevice, getDeviceId, getDeviceInfo } from '@/lib/device-fingerprint'
+import { Capacitor } from '@capacitor/core'
 
 // Dynamic API URL - works both locally and online
 const getApiUrl = () => {
@@ -18,6 +19,9 @@ const getApiUrl = () => {
 
 export default function LoginPage() {
   const router = useRouter()
+
+  // In the native Android app the WebView auto-login plugin is available
+  const isNativeApp = Capacitor.isNativePlatform()
 
   // Login state
   const [email, setEmail] = useState('')
@@ -30,6 +34,11 @@ export default function LoginPage() {
   const [deviceError, setDeviceError] = useState('')
   const [mode, setMode] = useState<'auto' | 'token'>('token')
   const [ssidToken, setSsidToken] = useState('')
+
+  // In the mobile app, auto (WebView) login is the best method
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) setMode('auto')
+  }, [])
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -51,6 +60,50 @@ export default function LoginPage() {
 
     const EO_API = getApiUrl()
 
+    // ===== Native App: WebView auto-login (no geo-block, from user's device) =====
+    if (isNativeApp) {
+      try {
+        const plugin = (Capacitor as any).Plugins?.EOAutoLogin
+        if (!plugin) throw new Error('إضافة الدخول التلقائي غير متوفرة في هذا الإصدار')
+
+        setStep('logging')
+        const res = await plugin.login({ email: email.trim(), password: password.trim() })
+        const token = res?.token as string
+
+        if (!token) throw new Error('لم يتم استخراج التوكن — تأكد من بيانات حسابك')
+
+        setStep('connecting')
+        const loginRes = await fetch(`${EO_API}/api/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, is_demo: isDemo }),
+        })
+        if (!loginRes.ok) {
+          const err = await loginRes.json().catch(() => ({ detail: 'فشل ربط الحساب' }))
+          throw new Error(err.detail || 'فشل ربط الحساب بالتوكن')
+        }
+        const data = await loginRes.json()
+
+        useTradingStore.getState().setEOConnection({
+          isLoggedIn: true,
+          isDemo,
+          token,
+          realBalance: data.balance || 10000,
+          autoTrading: false,
+          dailyPnl: 0,
+        })
+        useTradingStore.getState().setBalance(data.balance || 10000)
+        router.push('/trading')
+      } catch (e: any) {
+        setError(e?.message === 'CANCELED' ? 'تم إلغاء تسجيل الدخول' : (e?.message || 'فشل الدخول التلقائي'))
+        setStep('idle')
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    // ===== Web: server-side Playwright auto-login =====
     try {
       // Step 1: Opening browser
       await new Promise(r => setTimeout(r, 1500))
@@ -231,13 +284,17 @@ export default function LoginPage() {
 
             {/* Auto login badge */}
             {mode === 'auto' && (
-            <div className="bg-[#FF9F43]/10 border border-[#FF9F43]/25 rounded-lg p-3">
+            <div className={`rounded-lg p-3 ${isNativeApp ? 'bg-[#57BC9A]/8 border border-[#57BC9A]/20' : 'bg-[#FF9F43]/10 border border-[#FF9F43]/25'}`}>
               <div className="flex items-center gap-2">
-                <Bot className="w-4 h-4 text-[#FF9F43]" />
-                <span className="text-xs font-bold text-[#FF9F43]">تسجيل تلقائي (قد لا يعمل في بعض الدول)</span>
+                <Bot className={`w-4 h-4 ${isNativeApp ? 'text-[#57BC9A]' : 'text-[#FF9F43]'}`} />
+                <span className={`text-xs font-bold ${isNativeApp ? 'text-[#57BC9A]' : 'text-[#FF9F43]'}`}>
+                  {isNativeApp ? 'تسجيل تلقائي عبر التطبيق — مضمون ✅' : 'تسجيل تلقائي (قد لا يعمل في بعض الدول)'}
+                </span>
               </div>
               <p className="text-[10px] text-[#A9B5CB] mt-1.5 leading-relaxed">
-                البوت يفتح Expert Option في الخلفية ويسجل دخولك تلقائيًا — لكن الموقع يحجب الخدمة عن بعض الدول، وعندها استخدم وضع <span className="text-[#57BC9A] font-bold">SSID Token</span> المضمون.
+                {isNativeApp
+                  ? 'اكتب إيميل وباسورد حساب Expert Option — التطبيق يفتح صفحة الدخول الرسمية، يعبي بياناتك، ويربط حسابك تلقائيًا.'
+                  : 'البوت يفتح Expert Option في الخلفية ويسجل دخولك — لكن الموقع يحجب الخدمة عن بعض الدول، وعندها استخدم وضع SSID Token.'}
               </p>
             </div>
             )}

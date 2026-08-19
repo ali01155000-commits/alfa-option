@@ -55,7 +55,6 @@ server.log
 # Android SDK & JDK (too large for git)
 /android-sdk/
 /jdk/
-/android/
 /capacitor.config.json
 
 # Tool results

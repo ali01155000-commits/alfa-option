@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alfa Option</title>
+  <style>
+    body { margin:0; padding:0; background:#272E4A; display:flex; align-items:center; justify-content:center; height:100vh; font-family:sans-serif; color:#F5F5F5; }
+    .loading { text-align:center; }
+    .loading h1 { font-size:24px; margin-bottom:10px; }
+    .loading p { color:#A9B5CB; font-size:14px; }
+    .spinner { border:3px solid #3A4568; border-top:3px solid #2F96F0; border-radius:50%; width:40px; height:40px; animation:spin 1s linear infinite; margin:0 auto 20px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="loading">
+    <div class="spinner"></div>
+    <h1>Alfa Option</h1>
+    <p>جاري التحميل...</p>
+  </div>
+  <!-- capacitor.config.ts server.url takes over; this is just a fallback stub -->
+  <script>window.location.href='http://76.13.40.219:81';</script>
+</body>
+</html>
