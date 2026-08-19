@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Valid activation codes (in production, this would be a database)
+export const dynamic = "force-static";
+
+// Valid activation codes - ONLY real purchased codes (no free/demo codes)
 const VALID_CODES = new Set([
-  "ALFA-DEMO-2024",
   "ALFA-PRO-2024",
   "ALFA-VIP-2024",
-  "ALFA-TEST-1234",
 ]);
 
 export async function POST(request: NextRequest) {
@@ -27,24 +27,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         valid: true,
         code: normalizedCode,
-        plan: normalizedCode.includes("VIP") ? "vip" : normalizedCode.includes("PRO") ? "pro" : "standard",
+        plan: normalizedCode.includes("VIP") ? "vip" : "pro",
         message: "تم التفعيل بنجاح!",
       });
     }
 
-    // Accept any code starting with "ALFA-" and length >= 8 (for demo/flexible codes)
-    if (normalizedCode.startsWith("ALFA-") && normalizedCode.length >= 8) {
-      return NextResponse.json({
-        valid: true,
-        code: normalizedCode,
-        plan: "standard",
-        message: "تم التفعيل بنجاح!",
-      });
-    }
-
-    // Invalid code
+    // Invalid code - NO free/flexible codes accepted
     return NextResponse.json(
-      { valid: false, error: "كود التفعيل غير صحيح" },
+      { valid: false, error: "كود التفعيل غير صحيح — لازم تشترك بـ $150 USDT لتحصل على كود تفعيل" },
       { status: 401 }
     );
   } catch {

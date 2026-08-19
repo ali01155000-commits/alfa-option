@@ -42,7 +42,6 @@ const WALLETS = [
 ]
 const SUBSCRIPTION_PRICE = '$150'
 const TELEGRAM_CHANNEL = '@ALFa_proo'
-const DEMO_CODE = 'ALFA-DEMO-2024'
 
 // Generate a unique payment reference ID
 function generatePaymentId(): string {
@@ -107,28 +106,7 @@ export default function LandingPage() {
     setVerifying(false)
   }
 
-  const handleDemoCode = async () => {
-    setActivationCode(DEMO_CODE)
-    setError('')
-    // Auto-verify after setting the code
-    setVerifying(true)
-
-    try {
-      const ok = await verifyActivation(DEMO_CODE)
-      if (ok) {
-        setShowSuccessAnim(true)
-        setPageState('success')
-        setTimeout(() => {
-          router.push('/login')
-        }, 3000)
-      } else {
-        setError('حصل خطأ — حاول مرة أخرى')
-      }
-    } catch {
-      setError('حصل خطأ في الاتصال — حاول مرة أخرى')
-    }
-    setVerifying(false)
-  }
+  // Demo code function removed - no more free trial
 
   const handleBuyCode = () => {
     // Generate unique payment ID
@@ -289,22 +267,15 @@ export default function LandingPage() {
                   )}
                 </Button>
 
-                {/* Demo code hint */}
-                <div className="bg-[#57BC9A]/8 border border-[#57BC9A]/25 rounded-xl p-3">
+                {/* Purchase required notice - no free trial */}
+                <div className="bg-[#FFD700]/8 border border-[#FFD700]/25 rounded-xl p-3">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <Sparkles className="w-4 h-4 text-[#57BC9A]" />
-                    <span className="text-xs font-bold text-[#57BC9A]">تجربة مجانية</span>
+                    <Lock className="w-4 h-4 text-[#FFD700]" />
+                    <span className="text-xs font-bold text-[#FFD700]">تفعيل مدفوع فقط</span>
                   </div>
-                  <p className="text-[11px] text-[#A9B5CB] mb-2 leading-relaxed">
-                    عايز تجرب البوت الأول؟ استخدم الكود التجريبي:
+                  <p className="text-[11px] text-[#A9B5CB] leading-relaxed">
+                    لتفعيل البوت لازم تشترك بـ $150 USDT. مفيش كود تجريبي مجاني.
                   </p>
-                  <button
-                    onClick={handleDemoCode}
-                    className="w-full bg-[#20283D] border border-[#57BC9A]/30 rounded-lg p-2.5 text-center font-mono font-bold text-[#57BC9A] text-sm tracking-wider hover:bg-[#57BC9A]/10 transition-all"
-                  >
-                    {DEMO_CODE}
-                    <span className="block text-[9px] text-[#A9B5CB] font-normal mt-0.5 tracking-normal">اضغط هنا عشان تحط الكود تلقائي</span>
-                  </button>
                 </div>
 
                 {/* Divider */}
