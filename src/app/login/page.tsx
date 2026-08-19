@@ -299,6 +299,7 @@ export default function LoginPage() {
 
             {/* Email */}
             {mode === 'auto' && (
+            <>
             <div>
               <label className="text-xs text-[#A9B5CB] mb-1.5 block font-medium">الإيميل</label>
               <div className="relative">
@@ -338,6 +339,7 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
+            </>
             )}
 
             {/* Error */}
