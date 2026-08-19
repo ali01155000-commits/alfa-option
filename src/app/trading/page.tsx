@@ -23,9 +23,12 @@ import {
   LogOut,
   Shield,
   Coins,
+  Fingerprint,
 } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { BackButton } from '@/components/ui/back-button'
+import { checkDeviceAuthorization, getDeviceId, getBoundAccount } from '@/lib/device-fingerprint'
 
 export default function TradingPlatform() {
   const router = useRouter()
@@ -49,6 +52,39 @@ export default function TradingPlatform() {
       router.push('/')
     }
   }, [eoConnection.isLoggedIn, router])
+
+  // Device authorization check - kick out if device changed
+  const [deviceAuthError, setDeviceAuthError] = useState('')
+  useEffect(() => {
+    const boundEmail = getBoundAccount()
+    if (boundEmail && eoConnection.isLoggedIn) {
+      const auth = checkDeviceAuthorization(boundEmail)
+      if (!auth.authorized) {
+        setDeviceAuthError(auth.message || 'الجهاز غير مصرح')
+      }
+    }
+  }, [eoConnection.isLoggedIn])
+
+  if (deviceAuthError) {
+    return (
+      <div className="min-h-screen bg-[#272E4A] flex items-center justify-center p-4">
+        <div className="max-w-md w-full text-center space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-[#D0011B]/20 flex items-center justify-center mx-auto">
+            <Fingerprint className="w-8 h-8 text-[#D0011B]" />
+          </div>
+          <h2 className="text-lg font-bold text-[#D0011B]">جهاز غير مصرح</h2>
+          <p className="text-sm text-[#A9B5CB]">{deviceAuthError}</p>
+          <p className="text-xs text-[#A9B5CB]/70">سياسة الأمان: كل حساب يشتغل على جهاز واحد فقط</p>
+          <Button
+            onClick={() => { eoLogout(); router.push('/'); }}
+            className="bg-[#D0011B] hover:bg-[#A80115] text-white"
+          >
+            تسجيل خروج
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   if (!eoConnection.isLoggedIn) {
     return (
@@ -83,6 +119,8 @@ export default function TradingPlatform() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Back Button */}
+            <BackButton href="/" label="الرئيسية" className="mr-1" />
             {/* Alfa Coins Badge */}
             {alfaCoins.totalCoins > 0 && (
               <Badge className="text-[9px] h-5 px-2 bg-[#FFD700]/10 text-[#FFD700] border-[#FFD700]/30" variant="outline">
@@ -488,5 +526,3 @@ function AlfaCoinsPanel() {
     </div>
   )
 }
-
-import { useState } from 'react'

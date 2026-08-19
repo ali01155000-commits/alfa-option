@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { clearAccountBinding } from '@/lib/device-fingerprint'
 
 // ============ TYPES (Options Trading Model) ============
 export interface PriceData {
@@ -259,6 +260,7 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
     try {
       await fetch(`${EO_API}/api/logout`, { method: 'POST' })
     } catch {}
+    clearAccountBinding()
     set({
       eoConnection: {
         isLoggedIn: false,

@@ -15,6 +15,8 @@ import {
   Fingerprint, Rocket, Flame
 } from 'lucide-react'
 import Image from 'next/image'
+import { BackButton } from '@/components/ui/back-button'
+import { ChevronRight } from 'lucide-react'
 
 type PageState = 'landing' | 'activation' | 'success'
 type BuyStep = 'idle' | 'wallet' | 'screenshot' | 'send'
@@ -176,6 +178,23 @@ export default function LandingPage() {
       </div>
 
       <div className="relative max-w-lg mx-auto px-4 pt-6 pb-8">
+        {/* Navigation Bar */}
+        <div className="flex items-center justify-between mb-4">
+          {eoConnection.isLoggedIn ? (
+            <BackButton href="/trading" label="التداول" />
+          ) : (
+            <BackButton href="/login" label="تسجيل الدخول" />
+          )}
+          {pageState === 'activation' && buyStep !== 'idle' && (
+            <button
+              onClick={() => setBuyStep('idle')}
+              className="text-xs text-[#A9B5CB] hover:text-[#F5F5F5] flex items-center gap-1 transition-colors"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+              رجوع للتفعيل
+            </button>
+          )}
+        </div>
         {/* Logo + Brand */}
         <div className="text-center mb-6">
           <div className="relative w-24 h-24 mx-auto mb-3">

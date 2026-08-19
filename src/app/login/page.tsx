@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { TrendingUp, LogIn, Eye, EyeOff, AlertTriangle, Mail, Lock, Shield, Zap, Info, Bot, CheckCircle2, Loader2, Coins } from 'lucide-react'
+import { BackButton } from '@/components/ui/back-button'
+import { bindAccountToDevice, getDeviceId, getDeviceInfo } from '@/lib/device-fingerprint'
 
 // Dynamic API URL - works both locally and online
 const getApiUrl = () => {
@@ -25,14 +27,24 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [step, setStep] = useState<'idle' | 'opening' | 'logging' | 'extracting' | 'connecting'>('idle')
+  const [deviceError, setDeviceError] = useState('')
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       setError('الرجاء إدخال الإيميل والباسورد')
       return
     }
+
+    // ===== Device Binding Check =====
+    const bindResult = bindAccountToDevice(email.trim())
+    if (!bindResult.success) {
+      setDeviceError(bindResult.message || 'هذا الحساب مربوط بجهاز آخر')
+      return
+    }
+
     setLoading(true)
     setError('')
+    setDeviceError('')
     setStep('opening')
 
     const EO_API = getApiUrl()
@@ -93,6 +105,14 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#272E4A] flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-4">
+        {/* Back Button */}
+        <div className="flex items-center justify-between">
+          <BackButton href="/" label="الرئيسية" />
+          <div className="flex items-center gap-1.5 text-[9px] text-[#A9B5CB]/60">
+            <Shield className="w-3 h-3" />
+            <span>جهاز: {typeof window !== 'undefined' ? getDeviceInfo().split('•')[0]?.trim() : ''}</span>
+          </div>
+        </div>
         {/* Logo */}
         <div className="text-center mb-6">
           <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[#2F96F0] to-[#1A6DD0] flex items-center justify-center mx-auto mb-4 shadow-xl shadow-[#2F96F0]/30">

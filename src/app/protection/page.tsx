@@ -8,6 +8,7 @@ import {
   Wallet, Gift, CheckCircle2, AlertTriangle, BarChart3
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { BackButton } from '@/components/ui/back-button'
 
 type Tab = 'overview' | 'funds' | 'history' | 'how'
 
@@ -21,6 +22,7 @@ export default function ProtectionPage() {
       <div className="max-w-lg mx-auto space-y-4">
         {/* Header */}
         <div className="flex items-center gap-3">
+          <BackButton href="/trading" label="التداول" />
           <div className="w-10 h-10 rounded-xl bg-[#FFD700]/20 flex items-center justify-center">
             <Coins className="w-5 h-5 text-[#FFD700]" />
           </div>
