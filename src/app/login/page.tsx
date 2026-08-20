@@ -43,6 +43,12 @@ export default function LoginPage() {
     if (Capacitor.isNativePlatform()) setMode('auto')
   }, [])
 
+  // In the native app the flow is: settings → activate bot → EO login.
+  // Send the user straight to the bot setup page.
+  useEffect(() => {
+    if (isNativeApp) router.replace('/setup')
+  }, [isNativeApp, router])
+
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       setError('الرجاء إدخال الإيميل والباسورد')
