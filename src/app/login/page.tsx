@@ -64,7 +64,10 @@ export default function LoginPage() {
     if (isNativeApp) {
       try {
         const plugin = (Capacitor as any).Plugins?.EOAutoLogin
-        if (!plugin) throw new Error('إضافة الدخول التلقائي غير متوفرة في هذا الإصدار')
+        if (!plugin) {
+          setMode('token')
+          throw new Error('إضافة الدخول التلقائي غير متوفرة — استخدم وضع SSID Token بالأسفل')
+        }
 
         setStep('logging')
         const res = await plugin.login({ email: email.trim(), password: password.trim() })
@@ -95,7 +98,12 @@ export default function LoginPage() {
         useTradingStore.getState().setBalance(data.balance || 10000)
         router.push('/trading')
       } catch (e: any) {
-        setError(e?.message === 'CANCELED' ? 'تم إلغاء تسجيل الدخول' : (e?.message || 'فشل الدخول التلقائي'))
+        const msg = e?.message === 'CANCELED'
+          ? 'تم إلغاء تسجيل الدخول'
+          : e?.message === 'TIMEOUT'
+          ? 'انتهت المهلة بدون استخراج التوكن — سجل دخولك يدويًا في الصفحة اللي هتفتح، أو استخدم وضع SSID Token'
+          : (e?.message || 'فشل الدخول التلقائي')
+        setError(msg)
         setStep('idle')
       } finally {
         setLoading(false)
