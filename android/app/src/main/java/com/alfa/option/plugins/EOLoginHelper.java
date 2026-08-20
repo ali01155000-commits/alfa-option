@@ -22,19 +22,28 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
 /**
- * EOLoginHelper v3 - Standalone (no Capacitor bridge needed).
- * Opens Expert Option login in a dialog WebView, auto-fills credentials,
- * and captures the ssid token from ANY source:
- *   1. Cookies of the CURRENT page URL (any EO subdomain, HttpOnly included)
- *   2. Cookies of known EO domains
- *   3. localStorage / sessionStorage (exact 'ssid' key, embedded "ssid":"..." blobs, fuzzy token keys)
- *   4. Hooked WebSocket/XHR/fetch traffic (auth messages carry the token)
- * A manual "I'm logged in - return to bot" button force-scans everything.
+ * EOLoginHelper v4 - Standalone (no Capacitor bridge needed).
+ *
+ * Flow (matches the web /setup page):
+ *   1. Opens Expert Option login in a fullscreen dialog WebView (autofills if given).
+ *   2. Scans EVERY source for candidate tokens:
+ *        - cookies of the current page URL (any EO subdomain, HttpOnly included)
+ *        - cookies of known EO domains
+ *        - localStorage / sessionStorage (exact 'ssid' key, embedded "ssid":"..." blobs, fuzzy keys)
+ *        - hooked WebSocket/XHR/fetch auth traffic
+ *   3. Delivers each NEW candidate to the page via window.__eoToken(token).
+ *      Does NOT close - the page verifies it with the server, then replies:
+ *        eologin://result?ok=1            -> token valid, close the dialog
+ *        eologin://result?ok=0&token=...  -> rejected, keep scanning for a better one
+ *   4. "I'm logged in - return to bot" button force-scans everything.
  */
 public class EOLoginHelper {
 
@@ -50,7 +59,7 @@ public class EOLoginHelper {
             "https://mobile.expertoption.com",
             "https://api.expertoption.com"
     };
-    private static final long TIMEOUT_MS = 300_000; // 5 minutes
+    private static final long TIMEOUT_MS = 340_000; // page watchdog is 300s - stay longer
     private static final long POLL_MS = 1200;
 
     private static Dialog dialog;
@@ -61,10 +70,16 @@ public class EOLoginHelper {
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static int fillAttempts = 0;
 
+    /** Tokens the server rejected - never deliver these again. */
+    private static final Set<String> rejected =
+            Collections.synchronizedSet(new HashSet<String>());
+    /** Last candidate delivered to the page (avoid re-delivering the same one). */
+    private static volatile String lastDelivered = null;
+
     /**
-     * Injected on every page start/finish. Wraps WebSocket.send, XHR and fetch
-     * so any auth payload like "ssid":"..." or token=... is captured into
-     * window.__alfaCap before the app's own code runs.
+     * Injected on every page start/finish AND re-injected by the poll timer.
+     * Wraps WebSocket.send, XHR and fetch so any auth payload like
+     * "ssid":"..." or token=... is captured into window.__alfaCap.
      */
     private static final String HOOK_JS =
         "(function(){try{" +
@@ -119,6 +134,8 @@ public class EOLoginHelper {
                             final boolean autoFill, final Callback cb) {
         resolved = false;
         fillAttempts = 0;
+        lastDelivered = null;
+        rejected.clear();
         mainHandler.post(() -> {
             try {
                 openWindow(activity, email, password, autoFill, cb);
@@ -126,6 +143,22 @@ public class EOLoginHelper {
                 if (!resolved) { resolved = true; cb.onError("OPEN_ERROR: " + e.getMessage()); }
             }
         });
+    }
+
+    /** The server approved the last delivered token - close the EO screen. */
+    public static void confirmSuccess() {
+        if (resolved) return;
+        resolved = true;
+        cleanupTimer();
+        setStatus("✅ تم ربط حسابك وتشغيل البوت! جاري الإغلاق...");
+        dismissDialog();
+    }
+
+    /** The server rejected this token - blacklist it and keep scanning. */
+    public static void rejectToken(String token) {
+        if (token != null && !token.isEmpty()) rejected.add(token);
+        if (token != null && token.equals(lastDelivered)) lastDelivered = null;
+        setStatus("❌ السيرفر رفض التوكن ده — جاري البحث عن التوكن الصحيح...");
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -153,12 +186,12 @@ public class EOLoginHelper {
         TextView title = new TextView(activity);
         title.setText("تسجيل الدخول إلى Expert Option");
         title.setTextColor(Color.parseColor("#F5F5F5"));
-        title.setTextSize(15);
+        title.setTextSize(14);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         Button done = new Button(activity);
-        done.setText("✓ دخلت — ارجع للبوت");
+        done.setText("✓ دخلت");
         done.setTextColor(Color.parseColor("#57BC9A"));
         done.setTextSize(12);
         done.setBackgroundColor(Color.TRANSPARENT);
@@ -181,7 +214,7 @@ public class EOLoginHelper {
         statusView = new TextView(activity);
         statusView.setText("⏳ جاري فتح صفحة الدخول...");
         statusView.setTextColor(Color.parseColor("#57BC9A"));
-        statusView.setTextSize(12);
+        statusView.setTextSize(11);
         statusView.setPadding(0, dp(activity, 4), 0, 0);
 
         header.addView(headerRow);
@@ -243,6 +276,9 @@ public class EOLoginHelper {
             @Override
             public void run() {
                 mainHandler.post(() -> {
+                    // Re-inject the hook (cheap - guarded by __alfaHooked) so sockets
+                    // created right after navigation are also captured.
+                    if (webView != null) webView.evaluateJavascript(HOOK_JS, null);
                     scanNow(cb, false);
                     if (autoFill && fillAttempts < 10) {
                         final WebView wv = webView;
@@ -288,7 +324,7 @@ public class EOLoginHelper {
                 if (ssid != null) { src = "cookie:" + d; break; }
             }
         }
-        if (ssid != null && (!onLogin || force)) { accept(cb, ssid, src); return; }
+        if (ssid != null && (!onLogin || force)) { deliver(cb, ssid, src); return; }
 
         // 2) Deep scan inside the page (storage + hook + document.cookie)
         try {
@@ -310,11 +346,11 @@ public class EOLoginHelper {
                 String[] pref = {"ssid", "auth_token", "access_token"};
                 for (String k : pref) {
                     String v = cap.optString(k, null);
-                    if (v != null && v.length() >= 6) { accept(cb, v, "hook:" + k); return; }
+                    if (v != null && v.length() >= 6) { deliver(cb, v, "hook:" + k); return; }
                 }
                 if (force) {
                     String v = cap.optString("token", null);
-                    if (v != null && v.length() >= 6) { accept(cb, v, "hook:token"); return; }
+                    if (v != null && v.length() >= 6) { deliver(cb, v, "hook:token"); return; }
                 }
             }
 
@@ -330,7 +366,7 @@ public class EOLoginHelper {
                     if (!kl.equals("ssid")) continue;
                     String v = m.optString(k, "");
                     if (v.length() >= 6 && (!onLogin || force)) {
-                        accept(cb, v, "storage:" + st + "[ssid]"); return;
+                        deliver(cb, v, "storage:" + st + "[ssid]"); return;
                     }
                 }
             }
@@ -345,14 +381,14 @@ public class EOLoginHelper {
                     String v = m.optString(k, "");
                     String found = extractEmbeddedSsid(v);
                     if (found != null && (!onLogin || force)) {
-                        accept(cb, found, "storage:" + st + "[" + k + "]"); return;
+                        deliver(cb, found, "storage:" + st + "[" + k + "]"); return;
                     }
                 }
             }
 
             // (d) document.cookie ssid (JS-visible cookies)
             String dssid = extractSsid(o.optString("cookie", ""));
-            if (dssid != null && (!onLogin || force)) { accept(cb, dssid, "doc-cookie"); return; }
+            if (dssid != null && (!onLogin || force)) { deliver(cb, dssid, "doc-cookie"); return; }
 
             // (e) fuzzy token-like keys - only on manual press / timeout
             if (force) {
@@ -365,7 +401,7 @@ public class EOLoginHelper {
                         String kl = k == null ? "" : k.toLowerCase();
                         if (kl.contains("ssid") || kl.contains("token") || kl.contains("auth")) {
                             String v = m.optString(k, "");
-                            if (isTokenLike(v)) { accept(cb, v, "fuzzy:" + k); return; }
+                            if (isTokenLike(v)) { deliver(cb, v, "fuzzy:" + k); return; }
                         }
                     }
                 }
@@ -377,6 +413,19 @@ public class EOLoginHelper {
                     ? " — سجل دخولك بالأعلى وبعد الدخول اضغط ✓ دخلت"
                     : " — جاري قراءة التوكن... (" + keys + " مفتاح)"));
         } catch (Exception ignored) {}
+    }
+
+    /**
+     * Hands a NEW candidate to the web page for server verification.
+     * The dialog stays OPEN until eologin://result?ok=1 (confirmSuccess)
+     * or the whole login is cancelled/timed out.
+     */
+    private static synchronized void deliver(Callback cb, String token, String source) {
+        if (resolved || token == null || token.isEmpty()) return;
+        if (token.equals(lastDelivered) || rejected.contains(token)) return;
+        lastDelivered = token;
+        setStatus("⏳ تم العثور على توكن (" + source + ") — جاري التحقق منه مع السيرفر...");
+        cb.onToken(token);
     }
 
     private static boolean isLoginUrl(String url) {
@@ -427,15 +476,6 @@ public class EOLoginHelper {
         return true;
     }
 
-    private static synchronized void accept(Callback cb, String token, String source) {
-        if (resolved || token == null || token.isEmpty()) return;
-        resolved = true;
-        cleanupTimer();
-        setStatus("✅ تم استخراج التوكن (" + source + ") — جاري ربط حسابك...");
-        dismissDialog();
-        cb.onToken(token);
-    }
-
     // ================= Autofill =================
 
     private static void tryAutofill(WebView view, String email, String password) {
@@ -466,7 +506,7 @@ public class EOLoginHelper {
             "var inputs = document.querySelectorAll('input');" +
             "var e = document.querySelector('input[type=email]') || document.querySelector('input[name=email]') || document.querySelector('input#email');" +
             "var p = document.querySelector('input[type=password]') || document.querySelector('input[name=password]');" +
-            "if (!e) { for (var i=0;i<inputs.length;i++){ var it=inputs[i]; var t=(it.type||'').toLowerCase(); if (t==='text' || t==='email' || t==='tel') { e = it; break; } } }" +
+            "if (!e) { for (var i=0;i<inputs.length;i++){ var it=inputs[i]; var t=(it.type||'').toLowerCase(); if(t==='text' || t==='email' || t==='tel') { e = it; break; } } }" +
             "if (e && p) {" +
             "  setVal(e, '" + safeEmail + "');" +
             "  setVal(p, '" + safePass + "');" +

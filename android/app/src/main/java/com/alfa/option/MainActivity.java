@@ -28,6 +28,17 @@ public class MainActivity extends BridgeActivity {
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     Uri uri = request.getUrl();
                     if ("eologin".equals(uri.getScheme())) {
+                        // Reply from the /setup page after server-side verification:
+                        //   eologin://result?ok=1            -> token approved, close EO screen
+                        //   eologin://result?ok=0&token=...  -> rejected, keep scanning
+                        if ("result".equals(uri.getHost())) {
+                            if ("1".equals(uri.getQueryParameter("ok"))) {
+                                EOLoginHelper.confirmSuccess();
+                            } else {
+                                EOLoginHelper.rejectToken(uri.getQueryParameter("token"));
+                            }
+                            return true;
+                        }
                         handleEoLogin(view, uri);
                         return true; // consumed - do not navigate
                     }
