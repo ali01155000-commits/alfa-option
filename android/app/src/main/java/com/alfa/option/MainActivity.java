@@ -46,23 +46,32 @@ public class MainActivity extends BridgeActivity {
                 autoFill, new EOLoginHelper.Callback() {
             @Override
             public void onToken(String token) {
-                sendToPage(mainView, token, null);
+                sendToPage(mainView, token, null, 0);
             }
 
             @Override
             public void onError(String error) {
-                sendToPage(mainView, null, error);
+                sendToPage(mainView, null, error, 0);
             }
         });
     }
 
-    private void sendToPage(final WebView mainView, final String token, final String error) {
+    /**
+     * Delivers the token/error to the web page's window.__eoToken callback.
+     * If the page is still loading and the callback is not defined yet,
+     * retries a few times so the result is never lost.
+     */
+    private void sendToPage(final WebView mainView, final String token, final String error, final int attempt) {
         // Escape for embedding inside a JS string literal
         String safeToken = token == null ? "" : token.replace("\\", "\\\\").replace("'", "\\'");
         String safeError = error == null ? "" : error.replace("\\", "\\\\").replace("'", "\\'");
-        final String js = "window.__eoToken && window.__eoToken(" +
+        final String js = "(function(){if(!window.__eoToken)return 'missing';window.__eoToken(" +
                 (token != null ? "'" + safeToken + "'" : "null") +
-                (error != null ? ", '" + safeError + "'" : "") + ")";
-        mainView.post(() -> mainView.evaluateJavascript(js, null));
+                (error != null ? ", '" + safeError + "'" : "") + ");return 'ok';})()";
+        mainView.post(() -> mainView.evaluateJavascript(js, result -> {
+            if (result != null && result.contains("missing") && attempt < 8) {
+                mainView.postDelayed(() -> sendToPage(mainView, token, error, attempt + 1), 2000);
+            }
+        }));
     }
 }
