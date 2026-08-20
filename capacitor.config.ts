@@ -10,6 +10,9 @@ const config: CapacitorConfig = {
     url: 'http://76.13.40.219:81',
     cleartext: true,
   },
+  android: {
+    appendUserAgent: 'AlfaOptionApp',
+  },
   plugins: {
     StatusBar: {
       style: 'DARK',

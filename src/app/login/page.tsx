@@ -20,8 +20,11 @@ const getApiUrl = () => {
 export default function LoginPage() {
   const router = useRouter()
 
-  // In the native Android app the WebView auto-login plugin is available
-  const isNativeApp = Capacitor.isNativePlatform()
+  // In the native Android app the WebView auto-login plugin is available.
+  // Detect via Capacitor bridge OR the custom user agent (appends AlfaOptionApp).
+  const isNativeApp =
+    Capacitor.isNativePlatform() ||
+    (typeof navigator !== 'undefined' && /AlfaOptionApp/i.test(navigator.userAgent))
 
   // Login state
   const [email, setEmail] = useState('')
