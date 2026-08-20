@@ -12,7 +12,7 @@ import {
   BarChart3, Target, Brain, Cpu, ArrowRight, Lock,
   AlertTriangle, Gift, Wallet, Copy, Check, Send,
   Camera, QrCode, MessageCircle, ExternalLink,
-  Fingerprint, Rocket, Flame
+  Fingerprint, Rocket, Flame, Smartphone
 } from 'lucide-react'
 import Image from 'next/image'
 import { BackButton } from '@/components/ui/back-button'
@@ -163,6 +163,13 @@ export default function LandingPage() {
           ) : (
             <BackButton href="/login" label="تسجيل الدخول" />
           )}
+          <a
+            href="/download"
+            className="flex items-center gap-1.5 text-xs font-bold text-[#2F96F0] hover:text-[#1A7DE8] bg-[#2F96F0]/10 border border-[#2F96F0]/25 rounded-lg px-3 py-1.5 transition-colors"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            تحميل التطبيق 📱
+          </a>
           {pageState === 'activation' && buyStep !== 'idle' && (
             <button
               onClick={() => setBuyStep('idle')}
