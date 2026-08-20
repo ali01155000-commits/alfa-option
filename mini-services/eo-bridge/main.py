@@ -253,15 +253,22 @@ class AppState:
         self.balance = 0.0
         self.auto_trading = False
         self.auto_config = {
-            "amount": 10,
+            "amount": 10,                # لوت كل صفقة
             "expiryMinutes": 1,
             "strategy": "scalping",
-            "maxConcurrentTrades": 3,
-            "maxDailyLoss": 50,
-            "maxDailyProfit": 100,
+            "maxConcurrentTrades": 1,    # متتابع: صفقة واحدة في نفس الوقت فقط
+            "maxDailyLoss": 50,          # حد الخسارة اليومي
+            "maxDailyProfit": 100,       # حد الربح اليومي
+            "maxTrades": 0,              # عدد الصفقات الكلي (0 = غير محدود)
+            "recovery": False,           # نظام التعويض بعد الخسارة
+            "recoveryMultiplier": 2.0,   # معامل التعويض
             "pair": "EUR/USD",
             "assetId": 240,
         }
+        # Recovery state
+        self.pending_amount = 0          # مبلغ الصفقة القادمة بعد خسارة (تعويض)
+        self.loss_streak = 0
+        self.trades_today = 0
         self.open_trades: List[Dict] = []
         self.trade_history: List[Dict] = []
         self.daily_pnl = 0.0
@@ -277,6 +284,7 @@ class AppState:
         if now.hour == 0 and now.minute == 0:
             self.daily_pnl = 0
             self.daily_start = time.time()
+            self.trades_today = 0
 
     def init_strategy(self, strategy_name: str):
         if strategy_name in STRATEGIES:
@@ -330,6 +338,9 @@ class AutoConfigRequest(BaseModel):
     maxConcurrentTrades: Optional[int] = None
     maxDailyLoss: Optional[int] = None
     maxDailyProfit: Optional[int] = None
+    maxTrades: Optional[int] = None
+    recovery: Optional[bool] = None
+    recoveryMultiplier: Optional[float] = None
     pair: Optional[str] = None
 
 
@@ -446,6 +457,14 @@ def auto_trading_loop():
             daily_pnl = state.daily_pnl
             open_count = len(state.open_trades)
 
+        # عدد الصفقات الكلي
+        if config["maxTrades"] > 0 and state.trades_today >= config["maxTrades"]:
+            if state.auto_trading:
+                state.auto_trading = False
+                logger.info(f"🏁 تم تنفيذ كل الصفقات المحددة ({config['maxTrades']}) — البوت توقف تلقائيًا")
+            time.sleep(30)
+            continue
+
         if daily_pnl <= -config["maxDailyLoss"]:
             logger.warning(f"⛔ Max daily loss: ${daily_pnl:.2f} / -${config['maxDailyLoss']}")
             time.sleep(30)
@@ -476,33 +495,39 @@ def auto_trading_loop():
                 is_demo = 1 if state.is_demo else 0
                 expiry_seconds = config["expiryMinutes"] * 60
 
-                logger.info(f"📊 Signal: {signal.upper()} on {pair} @ {current_price}")
+                # مبلغ الصفقة: تعويض بعد خسارة أو اللوت الأساسي
+                trade_amount = state.pending_amount if state.pending_amount > 0 else config["amount"]
+                trade_amount = max(1, min(100, int(round(trade_amount))))
+                recovery_note = f" (تعويض #{state.loss_streak})" if state.pending_amount > 0 else ""
+
+                logger.info(f"📊 Signal: {signal.upper()} on {pair} @ {current_price} | ${trade_amount}{recovery_note}")
 
                 try:
                     if EO_AVAILABLE and state.api:
                         result = state.api.Buy(
-                            amount=config["amount"],
+                            amount=trade_amount,
                             type=direction,
                             assetid=asset_id,
                             exptime=expiry_seconds,
                             isdemo=is_demo,
                             strike_time=int(time.time())
                         )
-                        logger.info(f"✅ Trade: {direction.upper()} ${config['amount']} on {pair}")
+                        logger.info(f"✅ Trade: {direction.upper()} ${trade_amount} on {pair}{recovery_note}")
                     else:
                         result = "simulated"
-                        logger.info(f"📝 Sim trade: {direction.upper()} ${config['amount']} on {pair}")
+                        logger.info(f"📝 Sim trade: {direction.upper()} ${trade_amount} on {pair}{recovery_note}")
 
                     trade_record = {
                         "id": f"auto_{int(time.time())}_{direction}",
                         "pair": pair,
                         "direction": "buy" if direction == "call" else "sell",
                         "callPut": direction,
-                        "amount": config["amount"],
+                        "amount": trade_amount,
                         "assetId": asset_id,
                         "expiryMinutes": config["expiryMinutes"],
                         "entryPrice": current_price,
                         "strategy": config["strategy"],
+                        "isRecovery": state.pending_amount > 0,
                         "timestamp": int(time.time() * 1000),
                         "isDemo": state.is_demo,
                         "result": str(result)[:300] if result else None,
@@ -510,6 +535,9 @@ def auto_trading_loop():
 
                     with state._lock:
                         state.open_trades.append(trade_record)
+                        state.trades_today += 1
+                        if state.pending_amount > 0:
+                            state.pending_amount = 0  # استُخدم مبلغ التعويض
 
                     state.active_strategy.last_signal = signal
 
@@ -567,6 +595,27 @@ def trade_expiry_loop():
             with state._lock:
                 state.trade_history.append(closed_trade)
                 state.daily_pnl += pnl
+
+                # ===== نظام التعويض (Martingale) =====
+                config = state.auto_config
+                if config.get("recovery"):
+                    if won:
+                        if state.loss_streak > 0:
+                            logger.info(f"💚 ربح بعد تعويض! تصفير سلسلة الخسائر")
+                        state.loss_streak = 0
+                        state.pending_amount = 0
+                    else:
+                        state.loss_streak += 1
+                        multiplier = max(1.1, min(5.0, float(config.get("recoveryMultiplier", 2.0))))
+                        next_amount = config["amount"] * (multiplier ** state.loss_streak)
+                        state.pending_amount = max(1, min(100, int(round(next_amount))))
+                        logger.info(
+                            f"🔁 تعويض #{state.loss_streak}: الصفقة القادمة ${state.pending_amount} "
+                            f"لتعويض خسارة ${amount:.2f}"
+                        )
+                else:
+                    state.loss_streak = 0
+                    state.pending_amount = 0
 
             emoji = "🟢" if won else "🔴"
             logger.info(f"{emoji} Trade: {direction.upper()} ${amount} on {pair} - {'WON' if won else 'LOST'} ${abs(pnl):.2f}")
@@ -1132,11 +1181,23 @@ def update_auto_config(req: AutoConfigRequest):
             state.auto_config["strategy"] = req.strategy
             state.init_strategy(req.strategy)
         if req.maxConcurrentTrades is not None:
-            state.auto_config["maxConcurrentTrades"] = req.maxConcurrentTrades
+            # متتابع دائمًا: صفقة واحدة في نفس الوقت فقط
+            state.auto_config["maxConcurrentTrades"] = 1
         if req.maxDailyLoss is not None:
             state.auto_config["maxDailyLoss"] = req.maxDailyLoss
         if req.maxDailyProfit is not None:
             state.auto_config["maxDailyProfit"] = req.maxDailyProfit
+        if req.maxTrades is not None:
+            state.auto_config["maxTrades"] = max(0, req.maxTrades)
+            if req.maxTrades == 0:
+                state.trades_today = 0
+        if req.recovery is not None:
+            state.auto_config["recovery"] = req.recovery
+            if not req.recovery:
+                state.pending_amount = 0
+                state.loss_streak = 0
+        if req.recoveryMultiplier is not None:
+            state.auto_config["recoveryMultiplier"] = max(1.1, min(5.0, req.recoveryMultiplier))
         if req.pair is not None:
             state.auto_config["pair"] = req.pair
             state.auto_config["assetId"] = ASSET_MAP.get(req.pair, 240)
@@ -1154,6 +1215,10 @@ def get_auto_status():
         "config": state.auto_config,
         "dailyPnl": state.daily_pnl,
         "openTrades": len(state.open_trades),
+        "tradesToday": state.trades_today,
+        "recoveryActive": state.pending_amount > 0,
+        "nextRecoveryAmount": state.pending_amount,
+        "lossStreak": state.loss_streak,
         "strategy": state.active_strategy.name if state.active_strategy else None,
     }
 

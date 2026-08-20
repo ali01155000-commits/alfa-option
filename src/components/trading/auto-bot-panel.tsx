@@ -54,6 +54,10 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
   })
   const [showAddStrategy, setShowAddStrategy] = useState(false)
   const [configLoading, setConfigLoading] = useState(false)
+  const [maxTrades, setMaxTrades] = useState(0)
+  const [expiryMinutes, setExpiryMinutes] = useState(1)
+  const [recovery, setRecovery] = useState(false)
+  const [recoveryMultiplier, setRecoveryMultiplier] = useState(2.0)
 
   // Send config to Python bridge
   const sendBridgeConfig = async (updates: Record<string, any>) => {
@@ -201,21 +205,44 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
           <div className="space-y-2.5 pt-2 border-t border-[#3A4568]">
             <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#F5F5F5]">
               <Settings className="w-3 h-3 text-[#2F96F0]" />
-              <span>إدارة المخاطر</span>
+              <span>إعدادات البوت</span>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[#A9B5CB]">أقصى صفقات متزامنة</span>
-                <span className="text-xs font-mono font-bold text-[#F5F5F5]">{botConfig.maxConcurrentTrades}</span>
+            {/* Sequential badge */}
+            <div className="flex items-center gap-2 bg-[#2F96F0]/8 border border-[#2F96F0]/20 rounded-lg px-3 py-2">
+              <span className="text-[11px]">🔗</span>
+              <span className="text-[10px] text-[#A9B5CB] flex-1">صفقات متتابعة — صفقة واحدة فقط، والثانية بعد انتهاء الأولى</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-[#A9B5CB]">عدد الصفقات (0 = بلا حد)</label>
+                <Input
+                  type="number"
+                  value={maxTrades}
+                  min={0}
+                  onChange={(e) => {
+                    const v = Math.max(0, parseInt(e.target.value) || 0)
+                    setMaxTrades(v)
+                    sendBridgeConfig({ maxTrades: v })
+                  }}
+                  className="font-mono text-xs h-8 bg-[#20283D] border-[#3A4568] text-[#F5F5F5]"
+                />
               </div>
-              <Slider
-                value={[botConfig.maxConcurrentTrades]}
-                onValueChange={([v]) => handleUpdateBotConfig({ maxConcurrentTrades: v })}
-                min={1}
-                max={10}
-                step={1}
-              />
+              <div>
+                <label className="text-[10px] text-[#A9B5CB]">مدة الصفقة (دقيقة)</label>
+                <Input
+                  type="number"
+                  value={expiryMinutes}
+                  min={1}
+                  onChange={(e) => {
+                    const v = Math.max(1, parseInt(e.target.value) || 1)
+                    setExpiryMinutes(v)
+                    sendBridgeConfig({ expiryMinutes: v })
+                  }}
+                  className="font-mono text-xs h-8 bg-[#20283D] border-[#3A4568] text-[#F5F5F5]"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -241,7 +268,7 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-[#A9B5CB]">المبلغ لكل صفقة ($)</span>
+                <span className="text-xs text-[#A9B5CB]">المبلغ لكل صفقة — اللوت ($)</span>
                 <span className="text-xs font-mono font-bold text-[#F5F5F5]">${botConfig.riskPerTrade}</span>
               </div>
               <Slider
@@ -251,6 +278,42 @@ export function AutoBotPanel({ emit }: AutoBotPanelProps) {
                 max={100}
                 step={1}
               />
+            </div>
+
+            {/* Recovery (Martingale) */}
+            <div className="bg-[#FF9F43]/8 border border-[#FF9F43]/20 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-[#FF9F43]">🔁 نظام التعويض</span>
+                  <p className="text-[9px] text-[#A9B5CB] mt-0.5">بعد الخسارة، الصفقة التالية تكبر لتعويض الخسارة — وعند الربح ترجع للوت الأساسي</p>
+                </div>
+                <Switch
+                  checked={recovery}
+                  onCheckedChange={(v) => {
+                    setRecovery(v)
+                    sendBridgeConfig({ recovery: v })
+                  }}
+                />
+              </div>
+              {recovery && (
+                <div>
+                  <label className="text-[10px] text-[#A9B5CB]">معامل التعويض (1.1 - 5.0)</label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={recoveryMultiplier}
+                    onChange={(e) => {
+                      const v = Math.max(1.1, Math.min(5.0, parseFloat(e.target.value) || 2.0))
+                      setRecoveryMultiplier(v)
+                      sendBridgeConfig({ recoveryMultiplier: v })
+                    }}
+                    className="font-mono text-xs h-8 bg-[#20283D] border-[#3A4568] text-[#F5F5F5]"
+                  />
+                  <p className="text-[9px] text-[#A9B5CB]/70 mt-1">
+                    مثال: لوت $10 ومعامل 2 → بعد خسارة الصفقة التالية $20 ثم $40...
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </CardContent>

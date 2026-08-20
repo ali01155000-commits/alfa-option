@@ -66,40 +66,29 @@ export default function LoginPage() {
     // ===== Native App: WebView auto-login (no geo-block, from user's device) =====
     if (isNativeApp) {
       try {
-        const plugin = (Capacitor as any).Plugins?.EOAutoLogin
-        if (!plugin) {
-          setMode('token')
-          throw new Error('إضافة الدخول التلقائي غير متوفرة — استخدم وضع SSID Token بالأسفل')
-        }
-
         setStep('logging')
-        const res = await plugin.login({ email: email.trim(), password: password.trim() })
-        const token = res?.token as string
+
+        // Primary: URL-scheme channel (works without the Capacitor JS bridge)
+        // Fallback: plugin bridge if available
+        const plugin = (Capacitor as any).Plugins?.EOAutoLogin
+        let token: string
+
+        if (plugin?.login) {
+          try {
+            const res = await plugin.login({ email: email.trim(), password: password.trim() })
+            token = res?.token as string
+          } catch (pluginErr: any) {
+            // Plugin bridge failed midway — fall through to scheme
+            if (pluginErr?.message === 'CANCELED') throw pluginErr
+            token = await startSchemeLogin(email.trim(), password.trim())
+          }
+        } else {
+          token = await startSchemeLogin(email.trim(), password.trim())
+        }
 
         if (!token) throw new Error('لم يتم استخراج التوكن — تأكد من بيانات حسابك')
 
-        setStep('connecting')
-        const loginRes = await fetch(`${EO_API}/api/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, is_demo: isDemo }),
-        })
-        if (!loginRes.ok) {
-          const err = await loginRes.json().catch(() => ({ detail: 'فشل ربط الحساب' }))
-          throw new Error(err.detail || 'فشل ربط الحساب بالتوكن')
-        }
-        const data = await loginRes.json()
-
-        useTradingStore.getState().setEOConnection({
-          isLoggedIn: true,
-          isDemo,
-          token,
-          realBalance: data.balance || 10000,
-          autoTrading: false,
-          dailyPnl: 0,
-        })
-        useTradingStore.getState().setBalance(data.balance || 10000)
-        router.push('/trading')
+        await connectWithToken(token)
       } catch (e: any) {
         const msg = e?.message === 'CANCELED'
           ? 'تم إلغاء تسجيل الدخول'
@@ -207,6 +196,58 @@ export default function LoginPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // ===== WebView auto-login via URL scheme =====
+  // Works inside the Android app WITHOUT the Capacitor JS bridge:
+  // an invisible iframe navigates to eologin://login?... which the native
+  // side intercepts, opens Expert Option in a dialog, auto-fills, captures
+  // the ssid token and calls window.__eoToken(token) back on this page.
+  const startSchemeLogin = (email: string, password: string): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const W = window as any
+      const timeout = window.setTimeout(() => {
+        W.__eoToken = undefined
+        reject(new Error('TIMEOUT'))
+      }, 200_000)
+
+      W.__eoToken = (token: string | null, error?: string) => {
+        window.clearTimeout(timeout)
+        W.__eoToken = undefined
+        if (token) resolve(token)
+        else reject(new Error(error || 'NO_TOKEN'))
+      }
+
+      const iframe = document.createElement('iframe')
+      iframe.style.display = 'none'
+      iframe.src = `eologin://login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`
+      document.body.appendChild(iframe)
+      window.setTimeout(() => iframe.remove(), 10_000)
+    })
+
+  const connectWithToken = async (token: string) => {
+    setStep('connecting')
+    const EO_API = getApiUrl()
+    const loginRes = await fetch(`${EO_API}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, is_demo: isDemo }),
+    })
+    if (!loginRes.ok) {
+      const err = await loginRes.json().catch(() => ({ detail: 'فشل ربط الحساب' }))
+      throw new Error(err.detail || 'فشل ربط الحساب بالتوكن')
+    }
+    const data = await loginRes.json()
+    useTradingStore.getState().setEOConnection({
+      isLoggedIn: true,
+      isDemo,
+      token,
+      realBalance: data.balance || 10000,
+      autoTrading: false,
+      dailyPnl: 0,
+    })
+    useTradingStore.getState().setBalance(data.balance || 10000)
+    router.push('/trading')
   }
 
   const stepLabels: Record<string, { text: string; icon: React.ReactNode }> = {
