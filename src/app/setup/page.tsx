@@ -29,6 +29,7 @@ type BotReport = {
 
 const ST_ARABIC: Record<string, string> = {
   'idle': 'في انتظار التفعيل',
+  'opening': '⏳ جاري فتح Expert Option...',
   'wait-login': '⏳ سجّل دخولك في Expert Option — البوت يبدأ تلقائي بعد فتح حسابك',
   'no-bal': '⏳ انتظار فتح الحساب...',
   'no-amt': '🔍 البوت بيدور على خانة المبلغ في المنصة...',
@@ -38,6 +39,8 @@ const ST_ARABIC: Record<string, string> = {
   'win': '🎉 صفقة رابحة!',
   'loss': '📉 صفقة خاسرة — تعويض في الطريق',
   'skip': '➖ نتيجة غير واضحة — نكمّل',
+  'js-error': '⚠ خطأ داخلي في الصفحة',
+  'js-silent': '⚠ الصفحة مش بترد — المنصة ممكن تكون لسه بتحمّل',
   'done-max': '🏁 انتهى: اكتمل عدد الصفقات',
   'done-loss': '🏁 انتهى: وصلت لحد الخسارة',
   'done-profit': '🏁 انتهى: حققت حد الربح 🎉',
@@ -95,6 +98,34 @@ export default function SetupPage() {
     }, 2000)
     return () => window.clearInterval(iv)
   }, [phase])
+
+  // ===== Direct push channel from the native bot (works even if the
+  // server report fails): the app calls window.__botStatus(state) =====
+  useEffect(() => {
+    const W = window as any
+    W.__botStatus = (s: any) => {
+      if (!s || typeof s !== 'object') return
+      setReport((prev) => ({ ...prev, ...s }))
+      if (phaseRef.current !== 'running' && s.st && s.st !== 'opening') {
+        setPhase('running')
+      }
+      // forward to server so it lands in the log too
+      try {
+        const q = new URLSearchParams({
+          st: s.st || '', tr: String(s.tr ?? 0),
+          ...(s.bal != null ? { bal: String(s.bal) } : {}),
+          ...(s.pnl != null ? { pnl: String(s.pnl) } : {}),
+          ...(s.amt != null ? { amt: String(s.amt) } : {}),
+          ...(s.d ? { d: String(s.d) } : {}),
+        }).toString()
+        fetch(`${getApiUrl()}/api/bot-report-set?${q}`).catch(() => {})
+      } catch {}
+    }
+    return () => { W.__botStatus = undefined }
+  }, [])
+
+  const phaseRef = useRef(phase)
+  useEffect(() => { phaseRef.current = phase }, [phase])
 
   const fireScheme = (path: string, params: Record<string, string> = {}) => {
     const qs = Object.entries(params)

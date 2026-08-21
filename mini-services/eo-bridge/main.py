@@ -864,6 +864,16 @@ def post_bot_report(r: BotReport):
     return {"ok": True}
 
 
+@app.get("/api/bot-report-set")
+def bot_report_set(st: str = "", tr: int = 0, bal: float = None, pnl: float = None,
+                   amt: float = None, d: str = None):
+    """no-cors GET channel from the EO page itself (https -> http)."""
+    _bot_report.update({"st": st or "", "tr": tr, "bal": bal, "pnl": pnl,
+                        "amt": amt, "d": d, "ts": time.time()})
+    logger.info(f"🤖 [bot-set] {st} tr={tr} bal={bal} pnl={pnl} amt={amt} dir={d}")
+    return {"ok": True}
+
+
 @app.get("/api/bot-report")
 def get_bot_report():
     return _bot_report

@@ -21,6 +21,7 @@ public class MainActivity extends BridgeActivity {
         WebView mainView = getBridge().getWebView();
         if (mainView != null) {
             EOLoginHelper.setOrigin("http://76.13.40.219:81");
+            EOLoginHelper.setMainView(mainView);
             mainView.setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {

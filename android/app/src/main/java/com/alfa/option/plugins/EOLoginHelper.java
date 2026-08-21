@@ -18,6 +18,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.OutputStream;
@@ -28,16 +29,18 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 /**
- * EOLoginHelper v6 - Browser Bot (NO token extraction at all).
+ * EOLoginHelper v6.1 - Browser Bot (NO token extraction at all).
  *
  * Opens Expert Option in a fullscreen in-app browser. The user logs in
- * normally. As soon as the account page is detected (balance visible),
- * a bot loop runs INSIDE the same WebView:
- *   - sets the trade amount on the platform
- *   - clicks the platform's own Up/Down buttons (DOM automation)
- *   - one trade at a time; waits for the result via balance change
- *   - martingale recovery, profit/loss limits, max trades
- * Every step is reported to the server (/api/bot-report + debug-log).
+ * normally. As soon as the account page is detected, a bot loop runs
+ * INSIDE the same WebView (DOM automation: sets the amount, clicks the
+ * platform's own Up/Down buttons, reads the result from the balance).
+ *
+ * Reporting chain (all proven-working links):
+ *   EO bot JS  ->(evaluateJavascript return)->  Java handleStep
+ *             ->(evaluateJavascript on MAIN app WebView)->  window.__botStatus
+ *             ->(page fetch, works!)->  /api/bot-report -> server log
+ * Backup: JS-bridge fetch (no-cors) + Java HttpURLConnection beacon.
  */
 public class EOLoginHelper {
 
@@ -47,7 +50,6 @@ public class EOLoginHelper {
 
     private static final String START_URL = "https://expertoption.com/login";
     private static final long POLL_MS = 1500;
-    private static final long TIMEOUT_MS = 600_000; // 10 min watchdog
 
     private static Dialog dialog;
     private static WebView webView;
@@ -57,25 +59,34 @@ public class EOLoginHelper {
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static int fillAttempts = 0;
     private static String cfgJson = "{}";
-    private static String lastBeaconSt = "";
 
-    /** Holds the site origin so beacons know where to go. */
-    private static final class ORIGIN_HOLDER { static volatile String origin; }
+    /** Holders for cross-class wiring done by MainActivity. */
+    private static final class ORIGIN_HOLDER { static volatile String origin = "http://76.13.40.219:81"; }
+    private static final class MAIN_HOLDER { static volatile WebView view; }
 
-    /** Set once by MainActivity so diagnostics beacons reach the server. */
-    public static void setOrigin(String origin) { ORIGIN_HOLDER.origin = origin; }
+    public static void setOrigin(String origin) { if (origin != null) ORIGIN_HOLDER.origin = origin; }
+    public static void setMainView(WebView v) { MAIN_HOLDER.view = v; }
 
-    // ================= Diagnostics =================
+    // ================= Reporting =================
 
+    /** Primary channel: hand the state to the app's MAIN page (its fetch works). */
+    private static void pushToMainPage(String rawJson) {
+        WebView mv = MAIN_HOLDER.view;
+        if (mv == null || rawJson == null || rawJson.isEmpty()) return;
+        final String js = "window.__botStatus && window.__botStatus(" + rawJson + ")";
+        mv.post(() -> {
+            try { mv.evaluateJavascript(js, null); } catch (Exception ignored) {}
+        });
+    }
+
+    /** Backup channel: direct HTTP beacon from Java. */
     private static void beacon(final String tag, final String msg) {
         new Thread(() -> {
             HttpURLConnection c = null;
             try {
-                String origin = ORIGIN_HOLDER.origin;
-                if (origin == null) return;
                 String qs = "tag=" + URLEncoder.encode(tag, "UTF-8")
                           + "&msg=" + URLEncoder.encode(msg, "UTF-8");
-                c = (HttpURLConnection) new URL(origin + "/api/debug-log?" + qs).openConnection();
+                c = (HttpURLConnection) new URL(ORIGIN_HOLDER.origin + "/api/debug-log?" + qs).openConnection();
                 c.setConnectTimeout(3000);
                 c.setReadTimeout(3000);
                 c.connect();
@@ -86,29 +97,6 @@ public class EOLoginHelper {
         }, "alfa-beacon").start();
     }
 
-    private static void postReport(final JSONObject o) {
-        new Thread(() -> {
-            HttpURLConnection c = null;
-            try {
-                String origin = ORIGIN_HOLDER.origin;
-                if (origin == null) return;
-                c = (HttpURLConnection) new URL(origin + "/api/bot-report").openConnection();
-                c.setRequestMethod("POST");
-                c.setDoOutput(true);
-                c.setConnectTimeout(3000);
-                c.setReadTimeout(3000);
-                c.setRequestProperty("Content-Type", "application/json");
-                try (OutputStream os = c.getOutputStream()) {
-                    os.write(o.toString().getBytes("UTF-8"));
-                }
-                c.connect();
-            } catch (Exception ignored) {
-            } finally {
-                if (c != null) try { c.disconnect(); } catch (Exception ignored) {}
-            }
-        }, "alfa-report").start();
-    }
-
     // ================= Public API =================
 
     public static void openBot(final Activity activity, final String email, final String password,
@@ -116,12 +104,13 @@ public class EOLoginHelper {
         open = false;
         fillAttempts = 0;
         cfgJson = configJson == null ? "{}" : configJson;
-        lastBeaconSt = "";
         beacon("bot", "openBot cfg=" + cfgJson);
+        pushToMainPage("{\"st\":\"opening\",\"tr\":0}");
         mainHandler.post(() -> {
             try {
                 openWindow(activity, email, password, autoFill, cb);
             } catch (Exception e) {
+                beacon("bot", "open-error " + e.getMessage());
                 if (!open) { open = true; cb.onError("OPEN_ERROR: " + e.getMessage()); }
             }
         });
@@ -130,15 +119,15 @@ public class EOLoginHelper {
     /** Stop the bot loop but keep the browser open so the user sees results. */
     public static void stopBot(String reason) {
         beacon("bot", "stop requested (" + reason + ")");
+        pushToMainPage("{\"st\":\"stop\",\"tr\":0,\"d\":\"" + reason + "\"}");
         if (webView != null) {
             try {
                 webView.evaluateJavascript(
                     "(function(){if(window.__alfaBot){window.__alfaBot.stopped=true;return 'stopped';}return 'no-state';})()",
-                    v -> setStatus(reason != null && reason.contains("page")
-                        ? "⏹ البوت متوقف — المتصفح فاضل مفتوح تشوف نتيجتك"
-                        : "⏹ البوت متوقف"));
+                    v -> { });
             } catch (Exception ignored) {}
         }
+        setStatus("⏹ البوت متوقف — المتصفح فاضل مفتوح تشوف نتيجتك");
         cleanupTimer();
     }
 
@@ -216,6 +205,8 @@ public class EOLoginHelper {
         settings.setDomStorageEnabled(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setSupportMultipleWindows(false);
+        // allow the bot's no-cors backup fetch (https page -> http server)
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setUserAgentString(settings.getUserAgentString()
                 .replace("; wv", "") + " AlfaOptionApp/1.0");
 
@@ -228,6 +219,7 @@ public class EOLoginHelper {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 setStatus("⏳ " + hostOf(url) + (autoFill ? " — جاري تعبئة بياناتك..." : " — سجل دخولك هنا"));
+                beacon("bot", "page " + hostOf(url));
                 if (autoFill) tryAutofill(view, email, password);
             }
 
@@ -259,23 +251,24 @@ public class EOLoginHelper {
                     if (autoFill && fillAttempts < 10) tryAutofill(webView, email, password);
                     try {
                         webView.evaluateJavascript(botStepJs(), value -> handleStep(value));
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        beacon("bot", "eval-error " + e.getMessage());
+                    }
                 });
             }
         }, 2500, POLL_MS);
-
-        mainHandler.postDelayed(() -> {
-            if (!open) return;
-            // watchdog: nothing to do - bot keeps its own lifecycle
-        }, TIMEOUT_MS);
     }
 
     // ================= Bot step result handling =================
 
     private static void handleStep(String value) {
-        if (value == null || "null".equals(value) || value.length() < 3) return;
+        if (value == null || "null".equals(value) || value.length() < 3) {
+            // JS error or empty - report it once in a while so we can see it
+            pushToMainPage("{\"st\":\"js-silent\",\"tr\":0}");
+            return;
+        }
         try {
-            String raw = new org.json.JSONArray("[" + value + "]").getString(0);
+            String raw = new JSONArray("[" + value + "]").getString(0);
             JSONObject o = new JSONObject(raw);
             String st = o.optString("st", "");
             int tr = o.optInt("tr", 0);
@@ -284,13 +277,17 @@ public class EOLoginHelper {
             double amt = o.optDouble("amt", 0);
             String d = o.optString("d", "");
 
+            // Primary: hand to the app page (its fetch to the server works)
+            pushToMainPage(raw);
+
             // Live Arabic status in the header
             String s;
             switch (st) {
+                case "opening":   s = "⏳ جاري فتح Expert Option..."; break;
                 case "wait-login": s = "⏳ سجّل دخولك بالأعلى — البوت يبدأ تلقائي بعد فتح حسابك"; break;
                 case "no-bal":    s = "⏳ انتظار فتح الحساب..."; break;
-                case "no-amt":    s = "🔍 بادور على خانة المبلغ في المنصة..."; break;
-                case "no-btn":    s = "🔍 بادور على أزرار التداول (شراء/بيع)..."; break;
+                case "no-amt":    s = "🔍 بادور على خانة المبلغ في المنصة... (" + d + ")"; break;
+                case "no-btn":    s = "🔍 بادور على أزرار التداول (شراء/بيع)... (" + d + ")"; break;
                 case "click":     s = "✅ صفقة #" + tr + " (" + ("up".equals(d) ? "شراء ⬆" : "بيع ⬇") + ") بمبلغ " + fmt(amt) + "$"; break;
                 case "wait":      s = "⏳ صفقة #" + tr + " شغالة — انتظار النتيجة..."; break;
                 case "win":       s = "🎉 ربحت! صفقة #" + tr + " — نرجع للمبلغ الأساسي"; break;
@@ -299,18 +296,11 @@ public class EOLoginHelper {
                 case "done-max":     s = "🏁 انتهى البوت: اكتمل عدد الصفقات (" + tr + ")"; break;
                 case "done-loss":    s = "🏁 انتهى البوت: حد الخسارة"; break;
                 case "done-profit":  s = "🏁 انتهى البوت: حققت حد الربح 🎉"; break;
+                case "js-error":     s = "⚠ خطأ داخلي: " + d; break;
                 case "stop":         s = "⏹ البوت متوقف"; break;
                 default: s = st;
             }
             setStatus(s + (Double.isNaN(pnl) ? "" : "  |  النتيجة: " + (pnl >= 0 ? "+" : "") + fmt(pnl) + "$"));
-
-            // One beacon per state change + every report to the server
-            if (!st.equals(lastBeaconSt) || st.startsWith("done")) {
-                lastBeaconSt = st;
-                beacon("bot", st + " tr=" + tr + " bal=" + (Double.isNaN(bal) ? "-" : fmt(bal))
-                        + " pnl=" + (Double.isNaN(pnl) ? "-" : fmt(pnl)));
-            }
-            postReport(o);
 
             if (st.startsWith("done") || "stop".equals(st)) cleanupTimer();
         } catch (Exception ignored) {}
@@ -323,49 +313,65 @@ public class EOLoginHelper {
     // ================= The injected bot (runs in the EO page) =================
 
     private static String botStepJs() {
-        // All string literals use single quotes; JSON state lives on window.__alfaBot.
-        return "(function(){"
+        return "(function(){try{"
+            // ---- backup report straight from the page (no-cors GET) ----
+            + "var ORIGIN='" + ORIGIN_HOLDER.origin + "';"
+            + "function rep(o){try{var q='?st='+encodeURIComponent(o.st)+'&tr='+(o.tr||0)"
+            + "+(o.bal!=null?'&bal='+o.bal:'')+(o.pnl!=null?'&pnl='+o.pnl:'')"
+            + "+(o.amt!=null?'&amt='+o.amt:'')+(o.d?'&d='+encodeURIComponent(o.d):'');"
+            + "fetch(ORIGIN+'/api/bot-report-set'+q,{mode:'no-cors'}).catch(function(){});}catch(e){}}"
             + "var B=window.__alfaBot;"
             + "if(!B){B=window.__alfaBot={cfg:" + cfgJson + ",tr:0,ls:0,pend:0,waitUntil:0,before:null,lastBal:null,balEl:null,startBal:null,stopped:false,dir:1,grace:0};}"
-            + "function out(st,extra){var o={st:st,tr:B.tr,bal:B.lastBal,pnl:(B.startBal!==null&&B.lastBal!==null)?Math.round((B.lastBal-B.startBal)*100)/100:null,amt:B.pend>0?B.pend:B.cfg.amount};if(extra){o.d=extra.d;o.amt=extra.amt!==undefined?extra.amt:o.amt;}return JSON.stringify(o);}"
+            + "function out(st,extra){var o={st:st,tr:B.tr,bal:B.lastBal,pnl:(B.startBal!==null&&B.lastBal!==null)?Math.round((B.lastBal-B.startBal)*100)/100:null,amt:B.pend>0?B.pend:B.cfg.amount};"
+            + "if(extra){o.d=extra.d;o.amt=extra.amt!==undefined?extra.amt:o.amt;}rep(o);return JSON.stringify(o);}"
             + "if(B.stopped)return out('stop');"
             + "function txt(n){return (n.innerText||n.textContent||'').trim();}"
             + "function num(s){var m=String(s).replace(/[^0-9.\\-]/g,'');var f=parseFloat(m);return isNaN(f)?null:f;}"
-            // ---- balance element: prefers a '$'-prefixed value in the top area ----
+            // ---- balance: topmost short currency-like text ----
             + "function findBal(){"
             + " if(B.balEl&&document.contains(B.balEl)){var v0=num(txt(B.balEl));if(v0!==null){B.lastBal=v0;return v0;}}"
-            + " var els=document.querySelectorAll('div,span,p');var best=null,bestV=null,bestTop=1e9;"
+            + " var els=document.querySelectorAll('div,span,p,td');var best=null,bestV=null,bestTop=1e9;"
             + " for(var i=0;i<els.length;i++){var e=els[i];if(e.children.length>0)continue;var t=txt(e);"
-            + "  if(t.length<2||t.length>15)continue;if(t.charAt(0)!=='$'&&t.indexOf('＄')!==0)continue;"
+            + "  if(t.length<2||t.length>16)continue;if(!/^[\\s$₿€£¥]*[\\d,\\s]+(\\.[\\d]+)?[\\s$₿€£¥]*$/.test(t))continue;"
             + "  var v=num(t);if(v===null||v<=0)continue;var r=e.getBoundingClientRect();if(r.width===0||r.height===0)continue;"
             + "  if(r.top<bestTop){bestTop=r.top;best=e;bestV=v;}}"
             + " if(best){B.balEl=best;B.lastBal=bestV;if(B.startBal===null)B.startBal=bestV;return bestV;}"
             + " return null;"
             + "}"
-            // ---- trade amount input ----
-            + "function setAmount(v){"
-            + " var sels=['input[type=number]','input[inputmode=decimal]'];var inp=null;"
-            + " for(var i=0;i<sels.length&&!inp;i++){var q=document.querySelectorAll(sels[i]);if(q.length)inp=q[0];}"
-            + " if(!inp){var all=document.querySelectorAll('input');"
-            + "  outer:for(var j=0;j<all.length;j++){var a=all[j];var ty=(a.type||'text').toLowerCase();if(ty!=='text'&&ty!=='number'&&ty!=='tel')continue;"
-            + "   var p=a;for(var k=0;k<5&&p;p++){var c=(p.getAttribute('class')||'')+' '+(p.getAttribute('aria-label')||'');if(/amount|مبلغ/i.test(c)){inp=a;break outer;}p=p.parentElement;}}}"
-            + " if(!inp)return false;"
-            + " try{var setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
-            + "  setter.call(inp,String(v));inp.dispatchEvent(new Event('input',{bubbles:true}));inp.dispatchEvent(new Event('change',{bubbles:true}));return true;}catch(e){return false;}"
+            // ---- trade amount input: labeled, else first visible input in bottom half ----
+            + "function findAmountInput(){"
+            + " var q=document.querySelectorAll('input');var labeled=null;var bottom=null;var H=window.innerHeight||800;"
+            + " for(var i=0;i<q.length;i++){var a=q[i];var ty=(a.type||'text').toLowerCase();"
+            + "  if(ty==='password'||ty==='email'||ty==='checkbox'||ty==='hidden'||a.disabled||a.readOnly)continue;"
+            + "  var r=a.getBoundingClientRect();if(r.width===0||r.height===0)continue;"
+            + "  var p=a,lab=null;for(var k=0;k<6&&p&&!lab;p=p.parentElement){"
+            + "   var c=(p.getAttribute('class')||'')+' '+(p.getAttribute('aria-label')||'')+' '+(p.getAttribute('data-test')||'');"
+            + "   if(/amount|مبلغ|stake/i.test(c))lab=p;}"
+            + "  if(labeled===null&&lab)labeled=a;"
+            + "  if(bottom===null&&r.top>H*0.45)bottom=a;"
+            + " }"
+            + " B.diag='in='+q.length;"
+            + " return labeled||bottom||null;"
             + "}"
-            // ---- Up / Down buttons: class/text hints then green/red colors ----
+            + "function setAmount(v){var inp=findAmountInput();if(!inp)return false;"
+            + " try{var setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
+            + "  setter.call(inp,String(v));inp.dispatchEvent(new Event('input',{bubbles:true}));inp.dispatchEvent(new Event('change',{bubbles:true}));"
+            + "  inp.focus();return true;}catch(e){return false;}"
+            + "}"
+            // ---- Up / Down buttons: text/class hints then green/red colors ----
             + "function findButtons(){"
-            + " var up=null,down=null;var els=document.querySelectorAll('button,[role=button]');"
+            + " var up=null,down=null;var els=document.querySelectorAll('button,[role=button]');var cand=0;"
             + " for(var i=0;i<els.length;i++){var e=els[i];var r=e.getBoundingClientRect();"
-            + "  if(r.width<55||r.height<26)continue;"
+            + "  if(r.width<50||r.height<24)continue;cand++;"
             + "  var c=(((e.getAttribute('class')||'')+' '+(e.getAttribute('aria-label')||'')+' '+(e.getAttribute('title')||'')+' '+txt(e)).toLowerCase());"
-            + "  if(c.length>120)continue;"
+            + "  if(c.length>150)continue;"
             + "  var rgb=null;try{rgb=getComputedStyle(e).backgroundColor.match(/[\\d.]+/g);}catch(x){}"
             + "  var R=rgb?+rgb[0]:-1,G=rgb?+rgb[1]:-1,Bl=rgb?+rgb[2]:-1;"
             + "  var green=(G>=0&&G>R+30&&G>Bl+30),red=(R>=0&&R>G+30&&R>Bl+30);"
-            + "  if(!up&&(/(call|buy|higher|up\\b|above|أعلى|شراء)/.test(c)||green))up=e;"
-            + "  else if(!down&&(/(put|sell|lower|down\\b|below|أدنى|بيع)/.test(c)||red))down=e;"
+            + "  if(!up&&(/(call|buy|higher|up\\b|above|أعلى|شراء|صعود)/.test(c)||green))up=e;"
+            + "  else if(!down&&(/(put|sell|lower|down\\b|below|أدنى|بيع|هبوط)/.test(c)||red))down=e;"
             + " }"
+            + " B.diag+='/btn='+cand;"
             + " return {up:up,down:down};"
             + "}"
             // ================= one bot step =================
@@ -375,7 +381,6 @@ public class EOLoginHelper {
             + " if(document.querySelector('input[type=password]'))return out('wait-login');"
             + " return out('no-bal');"
             + "}"
-            // resolve an open trade's result via balance change
             + "if(B.before!==null){"
             + " if(now<B.waitUntil)return out('wait');"
             + " if(bal!==B.before){"
@@ -387,24 +392,23 @@ public class EOLoginHelper {
             + "  return out('loss');"
             + " }"
             + " B.grace++;"
-            + " if(B.grace>10){B.before=null;B.grace=0;return out('skip');}" // balance unchanged too long - move on without martingale
+            + " if(B.grace>10){B.before=null;B.grace=0;return out('skip');}"
             + " return out('wait');"
             + "}"
-            // limits
             + "var pnl=bal-(B.startBal===null?bal:B.startBal);"
             + "if(B.cfg.maxTrades>0&&B.tr>=B.cfg.maxTrades){B.stopped=true;return out('done-max');}"
             + "if(pnl<=-B.cfg.maxDailyLoss){B.stopped=true;return out('done-loss');}"
             + "if(B.cfg.maxDailyProfit>0&&pnl>=B.cfg.maxDailyProfit){B.stopped=true;return out('done-profit');}"
-            // place the next trade
             + "var amt=B.pend>0?B.pend:B.cfg.amount;"
-            + "if(!setAmount(amt))return out('no-amt');"
+            + "if(!setAmount(amt))return out('no-amt',{d:B.diag});"
             + "var btns=findButtons();"
-            + "if(!btns.up||!btns.down)return out('no-btn');"
+            + "if(!btns.up||!btns.down)return out('no-btn',{d:B.diag});"
             + "B.dir=(B.dir===1)?2:1;"
             + "var btn=(B.dir===1)?btns.up:btns.down;"
-            + "try{btn.click();}catch(e){return out('no-btn');}"
+            + "try{btn.click();}catch(e){return out('no-btn',{d:'clickfail'});}"
             + "B.tr++;B.before=bal;B.waitUntil=now+(B.cfg.expiryMs||60000)+2500;B.grace=0;"
             + "return out('click',{d:(B.dir===1)?'up':'down',amt:amt});"
+            + "}catch(err){try{var o={st:'js-error',d:String(err).substring(0,150)};rep(o);return JSON.stringify(o);}catch(e2){return JSON.stringify({st:'js-error'});}}"
             + "})()";
     }
 
