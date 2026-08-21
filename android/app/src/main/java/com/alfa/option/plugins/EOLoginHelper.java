@@ -135,7 +135,8 @@ public class EOLoginHelper {
                 webView.evaluateJavascript(
                     "(function(){if(window.__alfaBot){window.__alfaBot.stopped=true;return 'stopped';}return 'no-state';})()",
                     v -> setStatus(reason != null && reason.contains("page")
-                        ? "⏹ البوت متوقف — المتصفح فاضل مفتوح تشوف نتيجتك"));
+                        ? "⏹ البوت متوقف — المتصفح فاضل مفتوح تشوف نتيجتك"
+                        : "⏹ البوت متوقف"));
             } catch (Exception ignored) {}
         }
         cleanupTimer();
