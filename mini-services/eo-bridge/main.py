@@ -842,6 +842,33 @@ def debug_log(msg: str = "", tag: str = "app"):
     return {"ok": True}
 
 
+# ============ Browser-Bot live report ============
+class BotReport(BaseModel):
+    st: str = ""
+    tr: int = 0
+    bal: Optional[float] = None
+    pnl: Optional[float] = None
+    amt: Optional[float] = None
+    d: Optional[str] = None
+
+
+_bot_report: dict = {"st": "idle", "tr": 0, "bal": None, "pnl": None, "amt": None,
+                     "d": None, "ts": 0.0}
+
+
+@app.post("/api/bot-report")
+def post_bot_report(r: BotReport):
+    _bot_report.update({k: v for k, v in r.dict().items()})
+    _bot_report["ts"] = time.time()
+    logger.info(f"🤖 [browser-bot] {r.st} tr={r.tr} bal={r.bal} pnl={r.pnl} amt={r.amt} dir={r.d}")
+    return {"ok": True}
+
+
+@app.get("/api/bot-report")
+def get_bot_report():
+    return _bot_report
+
+
 @app.get("/api/status")
 def get_status():
     return {

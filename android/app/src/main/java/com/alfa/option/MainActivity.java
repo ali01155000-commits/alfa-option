@@ -10,40 +10,31 @@ import com.getcapacitor.BridgeWebViewClient;
 import com.alfa.option.plugins.EOAutoLoginPlugin;
 import com.alfa.option.plugins.EOLoginHelper;
 
+import org.json.JSONObject;
+
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Capacitor JS-bridge path (kept as primary if available)
         registerPlugin(EOAutoLoginPlugin.class);
 
-        // ===== URL-scheme path (works even when the JS bridge is not
-        // injected into the remote page). The web page triggers it with
-        // an iframe pointing to eologin://login?email=...&password=...
-        // and listens for window.__eoToken(token).
         WebView mainView = getBridge().getWebView();
         if (mainView != null) {
-            // Backup delivery channel on the MAIN webview too
-            mainView.addJavascriptInterface(new EOLoginHelper.NativePoll(), "__alfaNative");
-            // Remember the site origin for native diagnostics beacons
             EOLoginHelper.setOrigin("http://76.13.40.219:81");
             mainView.setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     Uri uri = request.getUrl();
                     if ("eologin".equals(uri.getScheme())) {
-                        // Reply from the /setup page after server-side verification:
-                        //   eologin://result?ok=1            -> token approved, close EO screen
-                        //   eologin://result?ok=0&token=...  -> rejected, keep scanning
-                        if ("result".equals(uri.getHost())) {
-                            if ("1".equals(uri.getQueryParameter("ok"))) {
-                                EOLoginHelper.confirmSuccess();
-                            } else {
-                                EOLoginHelper.rejectToken(uri.getQueryParameter("token"));
-                            }
-                            return true;
+                        String host = uri.getHost() == null ? "" : uri.getHost();
+                        switch (host) {
+                            case "login":
+                                handleBotLogin(uri);
+                                break;
+                            case "stop":
+                                EOLoginHelper.stopBot("page");
+                                break;
                         }
-                        handleEoLogin(view, uri);
                         return true; // consumed - do not navigate
                     }
                     return super.shouldOverrideUrlLoading(view, request);
@@ -52,41 +43,43 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    private void handleEoLogin(final WebView mainView, Uri uri) {
-        String email = uri.getQueryParameter("email");
-        String password = uri.getQueryParameter("password");
-        boolean autoFill = email != null && !email.isEmpty() && password != null && !password.isEmpty();
+    /**
+     * eologin://login?email=&password=&amount=&maxTrades=&maxDailyLoss=
+     *            &maxDailyProfit=&expiryMinutes=&recovery=&multiplier=
+     * Opens Expert Option in the in-app browser; once the user logs in,
+     * the bot trades INSIDE that same browser (no token at all).
+     */
+    private void handleBotLogin(Uri uri) {
+        String email = nvl(uri.getQueryParameter("email"));
+        String password = nvl(uri.getQueryParameter("password"));
 
-        EOLoginHelper.open(this, email == null ? "" : email, password == null ? "" : password,
-                autoFill, new EOLoginHelper.Callback() {
-            @Override
-            public void onToken(String token) {
-                sendToPage(mainView, token, null, 0);
-            }
+        try {
+            JSONObject cfg = new JSONObject();
+            cfg.put("amount", dval(uri, "amount", 5));
+            cfg.put("maxTrades", (int) dval(uri, "maxTrades", 0));
+            cfg.put("maxDailyLoss", dval(uri, "maxDailyLoss", 50));
+            cfg.put("maxDailyProfit", dval(uri, "maxDailyProfit", 100));
+            cfg.put("recovery", "1".equals(uri.getQueryParameter("recovery")));
+            cfg.put("multiplier", dval(uri, "multiplier", 2));
+            long minutes = Math.max(1, (long) dval(uri, "expiryMinutes", 1));
+            cfg.put("expiryMs", minutes * 60000L);
 
-            @Override
-            public void onError(String error) {
-                sendToPage(mainView, null, error, 0);
-            }
-        });
+            EOLoginHelper.openBot(this, email, password,
+                    !email.isEmpty() && !password.isEmpty(), cfg.toString(),
+                    error -> { /* surfaced via beacons */ });
+        } catch (Exception e) {
+            EOLoginHelper.stopBot("cfg-error");
+        }
     }
 
-    /**
-     * Delivers the token/error to the web page's window.__eoToken callback.
-     * If the page is still loading and the callback is not defined yet,
-     * retries a few times so the result is never lost.
-     */
-    private void sendToPage(final WebView mainView, final String token, final String error, final int attempt) {
-        // Escape for embedding inside a JS string literal
-        String safeToken = token == null ? "" : token.replace("\\", "\\\\").replace("'", "\\'");
-        String safeError = error == null ? "" : error.replace("\\", "\\\\").replace("'", "\\'");
-        final String js = "(function(){if(!window.__eoToken)return 'missing';window.__eoToken(" +
-                (token != null ? "'" + safeToken + "'" : "null") +
-                (error != null ? ", '" + safeError + "'" : "") + ");return 'ok';})()";
-        mainView.post(() -> mainView.evaluateJavascript(js, result -> {
-            if (result != null && result.contains("missing") && attempt < 8) {
-                mainView.postDelayed(() -> sendToPage(mainView, token, error, attempt + 1), 2000);
-            }
-        }));
+    private static String nvl(String s) { return s == null ? "" : s; }
+
+    private static double dval(Uri uri, String key, double def) {
+        try {
+            String v = uri.getQueryParameter(key);
+            return v == null || v.isEmpty() ? def : Double.parseDouble(v);
+        } catch (Exception e) {
+            return def;
+        }
     }
 }
