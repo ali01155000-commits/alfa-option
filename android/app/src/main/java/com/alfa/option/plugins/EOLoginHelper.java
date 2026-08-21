@@ -11,6 +11,7 @@ import android.os.Looper;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -22,6 +23,10 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -75,6 +80,46 @@ public class EOLoginHelper {
             Collections.synchronizedSet(new HashSet<String>());
     /** Last candidate delivered to the page (avoid re-delivering the same one). */
     private static volatile String lastDelivered = null;
+    /** Latest undelivered result for the polling backup channel. */
+    private static volatile String pendingJson = null;
+
+    /** Diagnostics beacon - lands in the eo-bridge server log. */
+    private static void beacon(final String msg) {
+        new Thread(() -> {
+            HttpURLConnection c = null;
+            try {
+                String origin = ORIGIN_HOLDER.origin;
+                if (origin == null) return;
+                String qs = "tag=native&msg=" + URLEncoder.encode(msg, "UTF-8");
+                c = (HttpURLConnection) new URL(origin + "/api/debug-log?" + qs).openConnection();
+                c.setConnectTimeout(3000);
+                c.setReadTimeout(3000);
+                c.connect();
+            } catch (Exception ignored) {
+            } finally {
+                if (c != null) try { c.disconnect(); } catch (Exception ignored) {}
+            }
+        }, "alfa-beacon").start();
+    }
+
+    /** Holds the site origin so beacons know where to go. */
+    private static final class ORIGIN_HOLDER { static volatile String origin; }
+
+    /** Set once by MainActivity so diagnostics beacons reach the server. */
+    public static void setOrigin(String origin) { ORIGIN_HOLDER.origin = origin; }
+
+    /**
+     * Backup channel: the page polls this from JS via
+     * window.__alfaNative.poll() (added with addJavascriptInterface).
+     */
+    public static class NativePoll {
+        @JavascriptInterface
+        public String poll() {
+            String j = pendingJson;
+            pendingJson = null;
+            return j == null ? "" : j;
+        }
+    }
 
     /**
      * Injected on every page start/finish AND re-injected by the poll timer.
@@ -135,7 +180,9 @@ public class EOLoginHelper {
         resolved = false;
         fillAttempts = 0;
         lastDelivered = null;
+        pendingJson = null;
         rejected.clear();
+        beacon("open email=" + (email == null || email.isEmpty() ? "manual" : "autofill"));
         mainHandler.post(() -> {
             try {
                 openWindow(activity, email, password, autoFill, cb);
@@ -148,6 +195,7 @@ public class EOLoginHelper {
     /** The server approved the last delivered token - close the EO screen. */
     public static void confirmSuccess() {
         if (resolved) return;
+        beacon("confirmed-ok");
         resolved = true;
         cleanupTimer();
         setStatus("✅ تم ربط حسابك وتشغيل البوت! جاري الإغلاق...");
@@ -158,6 +206,7 @@ public class EOLoginHelper {
     public static void rejectToken(String token) {
         if (token != null && !token.isEmpty()) rejected.add(token);
         if (token != null && token.equals(lastDelivered)) lastDelivered = null;
+        beacon("rejected len=" + (token == null ? 0 : token.length()));
         setStatus("❌ السيرفر رفض التوكن ده — جاري البحث عن التوكن الصحيح...");
     }
 
@@ -223,6 +272,8 @@ public class EOLoginHelper {
         webView = new WebView(activity);
         webView.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        // Backup channel for delivering the token to the page
+        webView.addJavascriptInterface(new NativePoll(), "__alfaNative");
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -424,7 +475,12 @@ public class EOLoginHelper {
         if (resolved || token == null || token.isEmpty()) return;
         if (token.equals(lastDelivered) || rejected.contains(token)) return;
         lastDelivered = token;
+        beacon("deliver len=" + token.length() + " src=" + source);
         setStatus("⏳ تم العثور على توكن (" + source + ") — جاري التحقق منه مع السيرفر...");
+        // Also queue for the polling backup channel
+        try {
+            pendingJson = new JSONObject().put("token", token).toString();
+        } catch (Exception ignored) {}
         cb.onToken(token);
     }
 

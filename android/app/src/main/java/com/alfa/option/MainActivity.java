@@ -23,6 +23,10 @@ public class MainActivity extends BridgeActivity {
         // and listens for window.__eoToken(token).
         WebView mainView = getBridge().getWebView();
         if (mainView != null) {
+            // Backup delivery channel on the MAIN webview too
+            mainView.addJavascriptInterface(new EOLoginHelper.NativePoll(), "__alfaNative");
+            // Remember the site origin for native diagnostics beacons
+            EOLoginHelper.setOrigin("http://76.13.40.219:81");
             mainView.setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {

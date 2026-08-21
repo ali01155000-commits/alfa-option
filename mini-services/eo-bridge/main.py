@@ -834,6 +834,14 @@ def auto_login_expertoption(email: str, password: str) -> Optional[str]:
 
 
 # ============ API Endpoints ============
+@app.get("/api/debug-log")
+def debug_log(msg: str = "", tag: str = "app"):
+    """Remote diagnostics beacon from the mobile app / web pages."""
+    safe = (msg or "")[:300].replace("\n", " ").replace("\r", " ")
+    logger.info(f"📱 [{tag}] {safe}")
+    return {"ok": True}
+
+
 @app.get("/api/status")
 def get_status():
     return {

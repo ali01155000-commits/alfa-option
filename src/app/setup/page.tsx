@@ -41,6 +41,46 @@ export default function SetupPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // ===== Diagnostics beacon: every step lands in the server log =====
+  const W = () => (typeof window !== 'undefined' ? (window as any) : undefined)
+
+  const beacon = (msg: string) => {
+    try {
+      fetch(`${getApiUrl()}/api/debug-log?tag=web&msg=${encodeURIComponent(msg)}`).catch(() => {})
+    } catch {}
+  }
+
+  // Report page load once (proves the user is on the NEW app flow)
+  useEffect(() => {
+    beacon(`setup-page-loaded ua=${navigator.userAgent.slice(0, 80)}`)
+  }, [])
+
+  // ===== Backup channel: poll the native JavascriptInterface in case
+  // the evaluateJavascript push never reaches the page =====
+  useEffect(() => {
+    const seen = new Set<string>()
+    const iv = window.setInterval(() => {
+      const nat = (window as any).__alfaNative
+      if (!nat || typeof nat.poll !== 'function') return
+      let raw: string
+      try { raw = nat.poll() } catch { return }
+      if (!raw) return
+      try {
+        const data = JSON.parse(raw)
+        if (data.token && !seen.has(data.token)) {
+          seen.add(data.token)
+          beacon(`poll-got-token len=${(data.token as string).length}`)
+          W()?.__eoToken?.(data.token)
+        } else if (data.error && !seen.has('err:' + data.error)) {
+          seen.add('err:' + data.error)
+          beacon(`poll-got-error ${data.error}`)
+          W()?.__eoToken?.(null, data.error)
+        }
+      } catch {}
+    }, 1500)
+    return () => window.clearInterval(iv)
+  }, [])
+
   const notifyNative = (ok: boolean, token?: string) => {
     try {
       const iframe = document.createElement('iframe')
@@ -54,6 +94,7 @@ export default function SetupPage() {
   }
 
   const fireSchemeLogin = () => {
+    beacon('fire-scheme-login (iframe eologin://login)')
     const iframe = document.createElement('iframe')
     iframe.style.display = 'none'
     iframe.src = `eologin://login?email=${encodeURIComponent(email.trim())}&password=${encodeURIComponent(password.trim())}`
@@ -66,6 +107,7 @@ export default function SetupPage() {
     const EO_API = getApiUrl()
     setPhase('verifying')
     setStatusMsg('⏳ جاري التحقق من التوكن مع السيرفر...')
+    beacon(`verify-start len=${token.length}`)
 
     // 1) Login (server connects to Expert Option and validates the token)
     const loginRes = await fetch(`${EO_API}/api/login`, {
@@ -74,12 +116,15 @@ export default function SetupPage() {
       body: JSON.stringify({ token, is_demo: isDemo }),
     })
     if (!loginRes.ok) {
+      const errDetail = await loginRes.json().catch(() => ({} as any))
+      beacon(`verify-REJECTED http=${loginRes.status} ${String(errDetail.detail || '').slice(0, 120)}`)
       notifyNative(false, token)
       setPhase('waiting-login')
       setStatusMsg('❌ التوكن ده مرفوض — لسه بندور على التوكن الصحيح... سجل دخولك كامل في الصفحة')
       return false
     }
     const data = await loginRes.json()
+    beacon(`verify-OK balance=${data.balance}`)
 
     // 2) Token is VALID → close the EO screen and start the bot
     notifyNative(true)
@@ -150,18 +195,21 @@ export default function SetupPage() {
     // 2) Listen for candidate tokens from the native WebView.
     //    The native side delivers EVERY new candidate it finds; we verify
     //    each one with the server and only accept when the server approves.
-    const W = window as any
-    W.__eoToken = async (token: string | null, err?: string) => {
+    W().__eoToken = async (token: string | null, err?: string) => {
       if (!token) {
+        beacon(`native-error ${err || 'unknown'}`)
         setPhase('setup')
         setStatusMsg('')
         setError(err === 'CANCELED' ? 'تم إلغاء الدخول' : 'انتهت مهلة الدخول — جرّب تاني')
         return
       }
+      beacon(`push-got-token len=${token.length} prefix=${token.slice(0, 6)}`)
       await verifyTokenAndStart(token)
     }
+    beacon('listener-ready')
 
     // 3) Open Expert Option login inside the app
+    beacon('activate-pressed')
     setPhase('waiting-login')
     setStatusMsg('🌐 فتح صفحة Expert Option — سجل دخولك وهنكمل الباقي تلقائي')
     fireSchemeLogin()
